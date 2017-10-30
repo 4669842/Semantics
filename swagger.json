@@ -734,7 +734,7 @@
     },
     "Pet" : {
       "type" : "object",
-      "required" : [ "name", "definition" ],
+      "required" : [ "name", "defintion" ],
       "properties" : {
         "name" : {
           "type" : "string",
