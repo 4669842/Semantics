@@ -744,8 +744,7 @@
           "example" : "Fuzzy_Name"
         },
         "status" : {
-          "type" : "string",
-          "enum" : [ "Valid", "Pending", "Disabled" ]
+          "type" : "array"
         }
       },
       "xml" : {
