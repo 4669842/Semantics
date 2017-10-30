@@ -19,6 +19,9 @@
     "name" : "store",
     "description" : "Access to Petstore orders"
   }, {
+    "name" : "URI",
+    "description" : "Allows pointing to objects over the World Wide Web"
+  }, {
     "name" : "user",
     "description" : "Operations about user",
     "externalDocs" : {
@@ -30,7 +33,7 @@
   "paths" : {
     "/pet" : {
       "post" : {
-        "tags" : [ "URI" ],
+        "tags" : [ "pet" ],
         "summary" : "Add a new URI to the to the list",
         "operationId" : "addPet",
         "consumes" : [ "application/json" ],
@@ -38,7 +41,7 @@
         "parameters" : [ {
           "in" : "body",
           "name" : "body",
-          "description" : "Pet object that needs to be added to the store",
+          "description" : "URI objects should be registered",
           "required" : true,
           "schema" : {
             "$ref" : "#/definitions/Pet"
