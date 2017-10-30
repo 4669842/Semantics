@@ -30,7 +30,7 @@
   "paths" : {
     "/pet" : {
       "post" : {
-        "tags" : [ "pet" ],
+        "tags" : [ "URI" ],
         "summary" : "Add a new URI to the to the list",
         "operationId" : "addPet",
         "consumes" : [ "application/json" ],
@@ -736,20 +736,7 @@
       }
     },
     "Pet" : {
-      "type" : "object",
-      "required" : [ "name" ],
-      "properties" : {
-        "name" : {
-          "type" : "string",
-          "example" : "Fuzzy_Name"
-        },
-        "status" : {
-          "type" : "array"
-        }
-      },
-      "xml" : {
-        "name" : "Pet"
-      }
+      "type" : "object"
     },
     "ApiResponse" : {
       "type" : "object",
