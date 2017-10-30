@@ -27,7 +27,7 @@
   "paths" : {
     "/pet" : {
       "post" : {
-        "tags" : [ "pet" ],
+        "tags" : [ "URI" ],
         "summary" : "Add a new URI to the to the list",
         "operationId" : "addPet",
         "consumes" : [ "application/json" ],
@@ -736,16 +736,18 @@
       "type" : "object",
       "required" : [ "name", "defintion" ],
       "properties" : {
-        "name" : "Pet",
-        "definition" : {
-          "type" : "String",
-          "example" : "Unicode valid URI for accessing files over the semantic web"
-        },
-        "status" : {
-          "type" : "String",
-          "enum" : "In Development"
-        },
-        "xml" : null
+        "name" : null,
+        "type" : "string",
+        "example" : "Fuzzy_Name"
+      },
+      "definition" : {
+        "type" : "String",
+        "example" : "Unicode valid URI for accessing files over the semantic web"
+      },
+      "status" : {
+        "name" : null,
+        "type" : "String",
+        "enum" : "In Development"
       }
     },
     "ApiResponse" : {
