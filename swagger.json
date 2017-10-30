@@ -736,21 +736,16 @@
       "type" : "object",
       "required" : [ "name", "defintion" ],
       "properties" : {
-        "name" : {
-          "type" : "string",
-          "example" : "Fuzzy_Name"
-        },
+        "name" : "Pet",
         "definition" : {
           "type" : "String",
           "example" : "Unicode valid URI for accessing files over the semantic web"
         },
         "status" : {
-          "type" : "array",
-          "enum" : [ "Valid", "Pending", "Disabled" ]
-        }
-      },
-      "xml" : {
-        "name" : "Pet"
+          "type" : "String",
+          "enum" : "In Development"
+        },
+        "xml" : null
       }
     },
     "ApiResponse" : {
