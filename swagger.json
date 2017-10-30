@@ -15,14 +15,7 @@
   },
   "host" : "virtserver.swaggerhub.com",
   "basePath" : "/Bournemouth/Registry/1.0.0",
-  "tags" : [ {
-    "name" : "URI's",
-    "description" : "Registered URI's are listed and used to point definitions of naming.",
-    "externalDocs" : {
-      "description" : "Find out more",
-      "url" : "http://swagger.io"
-    }
-  }, {
+  "tags" : [ { }, {
     "name" : "store",
     "description" : "Access to Petstore orders"
   }, {
