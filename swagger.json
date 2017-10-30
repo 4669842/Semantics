@@ -15,7 +15,7 @@
   },
   "host" : "virtserver.swaggerhub.com",
   "basePath" : "/Bournemouth/Registry/1.0.0",
-  "tags" : [ { }, {
+  "tags" : [ {
     "name" : "store",
     "description" : "Access to Petstore orders"
   }, {
