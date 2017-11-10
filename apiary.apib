@@ -1,80 +1,4828 @@
 FORMAT: 1A
 HOST: http://polls.apiblueprint.org/
 
-# bu
+# API
 
 Polls is a simple API allowing consumers to view polls and vote in them.
+FORMAT: 1A
 
-## Questions Collection [/questions]
+Our API is JSON-only:
+The request body must be JSON-encoded, having the *Content-Type* header set to `application/json`.
+In return, non-empty responses will also have a *Content-Type* of `application/json`.
 
-### List All Questions [GET]
+## Errors
 
-+ Response 200 (application/json)
+This API uses standard [HTTP status codes] to inform the client about the outcome of a request.
+If the response status code is in the `4xx`/`5xx` range, the response body contains an error object like the following:
 
-        [
-            {
-                "question": "Favourite programming language?",
-                "published_at": "2015-08-05T08:40:51.620Z",
-                "choices": [
-                    {
-                        "choice": "Swift",
-                        "votes": 2048
-                    }, {
-                        "choice": "Python",
-                        "votes": 1024
-                    }, {
-                        "choice": "Objective-C",
-                        "votes": 512
-                    }, {
-                        "choice": "Ruby",
-                        "votes": 256
-                    }
-                ]
-            }
-        ]
-
-### Create a New Question [POST]
-
-You may create your own question using this action. It takes a JSON
-object containing a question and a collection of answers in the
-form of choices.
-
-+ Request (application/json)
-
-        {
-            "question": "Favourite programming language?",
-            "choices": [
-                "Swift",
-                "Python",
-                "Objective-C",
-                "Ruby"
-            ]
+    {
+        "response_code": 404,
+        "error": {
+            "code": 3,
+            "message": "The resource does not exist."
         }
+    }
 
-+ Response 201 (application/json)
+[HTTP status codes]: https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
+
+*   `response_code` (type: *int*) is the original HTTP status code of the response.
+*   `code` (type: *int*) represents a more specific error code.
+    It can help clients to automatically recover from an error.
+*   `message` (type: *string*) is a human readable description of the error.
+    It can be shown to users and is localizable (see the **I18N** section below).
+
+The additional error codes are usually specific to certain resources.
+They will be explained in the corresponding subsections of this documentation.
+However, there are a few generic error codes which can always happen:
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">0</td>
+      <td>
+        <q>Something did not work out as expected.
+        An automatic E-Mail is sent to Dealini and we will look into the problem.</q>
+      </td>
+      <td align="right">500</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">1</td>
+      <td>
+        Generally malformatted input.
+        A detailed description of the error is given in the error description.
+      </td>
+      <td align="right">400</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">2</td>
+      <td>
+        <q>A resource which is only available to logged-in user is requested by an unauthorized user.
+        Either the user is not logged in or his session timed out.</q>
+      </td>
+      <td align="right">401</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">3</td>
+      <td>
+        <q>The resource does not exist.</q>
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">4</td>
+      <td>
+        <q>This resource is only available to non-anonymous users.</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">5</td>
+      <td>
+        You tried to change a write-protected field without having the necessary permissions.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">6</td>
+      <td>
+        The chosen request method is not allowed for this resource.
+      </td>
+      <td align="right">405</td>
+    </tr>
+  </tbody>
+</table>
+
+> *Note*:
+> If your client is not in control of the HTTP stack and can not properly handle `4xx`/`5xx` status codes, you can pass `suppress_response_codes=true` as a parameter to your request.
+> This tells the server to unconditionally return a **200 OK** response.
+> Your client is then responsible to distinguish between successful and errorneous answers.
+> The original status code is always available from the error object.
+
+## Authentication
+
+Most API calls require a valid *authentication token*.
+Such a token can be obtained from the **Sessions** resource.
+Our auth token is a standard [HTTP cookie], and should be handled by clients like browsers do (i.e. sending, receiving and expiration).
+
+[HTTP cookie]: https://en.wikipedia.org/wiki/HTTP_cookie
+
+There are two types of user accounts:
+
+*   *Registered* users are created with a valid email address (using a password or Facebook to log in).
+*   *Anonymous* users are created with a unique device identifier (using the this identifier alone to log in).
+
+Some API resources only work for *registered* users.
+The API will return a **HTTP 403 Forbidden** with the error code 4 in case an *anonymous* user tries to access such a resource.
+A client can only get around this error by upgrading the user account type (see the **Users** resource for details how to do that).
+The resources which are only available for *registered* users may change over time and are therefore not explicitly mentioned in this documentation.
+
+> *Recommendation*:
+> Clients should implement a generic handler for this error and offer the user to upgrade ("register") his account.
+
+## Internationalization (i18n)
+
+Document content and error messages can be localized to one of the following languages: `de`, `fr`, `it`.
+The preferred language can be chosen using the [HTTP *Accept-Language* header][HttpAcceptLanguage].
+If no suitable translation was found, the response uses a default language.
+For document content the default language is German, and for error messages it is English.
+
+[HttpAcceptLanguage]: http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.4
+
+## Request Parameters
+
+The API supports a few general parameters you can set when requesting documents.
+
+### Fields
+
+The `fields` (or `fields[]`) parameter can be used by clients to tailor the returned document to their needs.
+
+1.  Clients can request only a subset of the available resource attributes.
+    The `id` of the requested document is always included.
+    For example, the following request returns only the attributes `foo`, `bar` and `id`:
+    
+        GET /deals?fields=foo&fields=bar
+
+2.  Some resources also have additional *optional* attributes, which are only returned when requested by the client.
+
+3.  Embedded documents can also be targeted by this parameter using the dot notation.
+    For example, the following request returns only the `bar` attribute from the embedded `foo` document (and the `id` of course):
+    
+        GET /deals?fields=foo.bar
+
+> *Note*:
+> Remember that the response always only contains the requested attributes if the `fields` parameter is present.
+> If a client wants both the normal document as well as optional or embedded attributes, *all* these attributes have to be explicitly requested.
+
+### Testing
+
+It is sometimes undesirable to actually create data on the server while testing API calls.
+Adding the request parameter `rollback=true` prevents the server from persisting data created for a specific request.
+The response will still contain the data, as if everything worked normally.
+
+## Common Data Types
+
+There are a few generic data types used throughout the API.
+
+### Date Format
+
+JSON does not have a native datetime type.
+Instead the API always returns a JSON string containing an [ISO 8601] datetime (or date).
+To be precise, the only supported datetime format is `%Y-%m-%dT%H:%m:%SZ` (UTC, no microseconds).
+The date format is `%Y-%m-%d`.
+
+[ISO 8601]: https://en.wikipedia.org/wiki/ISO_8601
+
+The API not just responds with these formats, it also expects it on requests.
+Attributes which contain such a datetime (or date) value are marked as of type `isodatetime` (or `isodate`) throughout the documentation.
+
+### Images
+
+Images are not served by the API server itself, but rather a CDN.
+The CDN can serve the base image in different *version*, which correspond to the different screen resolutions on mobile devices.
+Resource attributes which point to images always return an embedded object like the following:
+
+    {   
+        "desc": "an image",
+        "url": "https://img.example.net/sample.jpg",
+        "versions": {
+            "1x": u"https://img.example.net/c_fill,h_50,w_50/sample.jpg",
+            "2x": u"https://img.example.net/c_fill,dpr_2.0,h_50,w_50/sample.jpg", 
+            "mdpi": u"https://img.example.net/c_fill,dpr_1.0,h_50,w_50/sample.jpg",
+            "hdpi": u"https://img.example.net/c_fill,dpr_1.5,h_50,w_50/sample.jpg",
+            "xhdpi": u"https://img.example.net/c_fill,dpr_2.0,h_50,w_50/sample.jpg",
+            "xxhdpi": u"https://img.example.net/c_fill,dpr_3.0,h_50,w_50/sample.jpg",
+            "thumb": u"https://img.example.net/c_thumb,h_50,w_50/sample.jpg"
+        },
+        "dimensions": {
+            "width": 100,
+            "height: 200
+        }
+    }
+
+*   `desc` (type: *string*) describes the image.
+*   `url` (type: *string*) is the base URL to the original image.
+*   `versions` (type: *object*) contains URLs for the original image transformed for different screen resolutions (.
+*   `dimensions` (type: *object*) describes the image size in *device independent pixels* (dip).
+    It contains the two keys `width` and `height`, both of type *int*.
+    
+    > *Note*:
+    > On Android, the device independent image size corresponds to the size of the image at the `mdpi` resolution.
+    > On iOS, it corresponds to the size of the image at the `1x` resolution.
+
+Attributes which point to an image are marked as of type `image(width, height)`, where `width` and `height` correspond to the `dimensions` value of the returned *Image* object.
+
+
+# Group Sessions
+
+Creation & removal of sessions.
+Login and Logout are handled here
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">10</td>
+      <td>
+        <q>Email and password or the Facebook access token must be provided</q><br>
+        This happens if either the Facebook access token, the email or the password were not provided at all.
+      </td>
+      <td align="right">400</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">11</td>
+      <td>
+        <q>Email or password did not match.</q>
+      </td>
+      <td align="right">401</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">12</td>
+      <td>
+        <q>Session does not exist</q><br>
+        The session either never existed or it was already terminated.
+      </td>
+      <td align="right">401</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">13</td>
+      <td>
+        <q>Invalid Facebook access token</q><br>
+        The access token could not be used, either because it is malformatted or expired.
+      </td>
+      <td align="right">400</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">14</td>
+      <td>
+        <q>Could not find user</q><br>
+        The user could not be found based on the provided identification.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">15</td>
+      <td>
+        <q>The user is banned</q><br>
+        The user is marked as banned.
+        Normally the user is informed by email about the reasons.
+      </td>
+      <td align="right">401</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">16</td>
+      <td>
+        <q>Your facebook password changed.
+        Please update your password in the Facebook settings.</q><br>
+        On iOS it is necessary to update the password in the native Facebook app.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">17</td>
+      <td>
+        <q>There was a problem with your facebook credentials. Please try again later.</q><br>
+        The provided access token is likely expired.
+        This is usually handled by the native Facebook app (so a new facebook access token should be requested), but it might also happen if the Facebook server is not (yet) up to date.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">18</td>
+      <td>
+        <q>Unknown problem when communicating with facebook. Please try again later.</q><br>
+        The Facebook servers are currently unreachable from the dealini backend.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">19</td>
+      <td>
+        <q>You need a valid verified email address to signup.</q><br>
+        If the user's Facebook email is not validated, he cannot login with dealini.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## Session [/sessions/current]
+
+The session object.
+
++ Model
 
     + Headers
 
-            Location: /questions/2
+            Set-Cookie: dealinidev_auth=5b068891ae586391d30c4aeed158ce5a6829af58b5bb9280f22c46689c9314b61482edf8; httponly; Path=/
+
+### Logout a User [DELETE]
+
++ Response 204
+
+## Session collection [/sessions]
+
+### Create a new Session [POST]
+
+The following parameters are available:
+
+*   `email` *(unicode string)*:
+        login of user
+*   `password` *(unicode string)*:
+        password of user
+*   `fb_access_token` *(string)*:
+        A valid FB access token.
+        If this is given, email&password are ignored
+*   `device_identifier` *(string)*:
+        A unique identifier for the device used for anonymous users
+
++ Request Login with E-Mail and Password (application/json)
+
+        {
+            "email": "dealinitest1@dealini.ch",
+            "password": "de-a-lini"
+        }
+
++ Request Login with Facebook (application/json)
+
+        {
+            "fb_access_token": "AAACukElzvo0BALBn7XKCA6ZAnJ5MZCaDV6JJK4f0XDVUENgqGyRRWLXAUV4yL8MnHaw4JUCzFvBZC7if9ZAsIoVhIuv3TljWxNKVY83eJR6sTX6pOZBqs"
+        }
+
++ Request Login with unique device identifier (application/json)
+
+        {
+            "device_identifier": "anystringwhichisunique"
+        }
+
++ Response 204
+
+    [Session][]
+
+
+# Group Users
+
+All requests belonging to a user, e.g. creating, changing and fetching.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">16</td>
+      <td>
+        <q>Your facebook password changed.
+        Please update your password in the Facebook settings.</q><br>
+        On iOS it is necessary to update the password in the native Facebook app.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">17</td>
+      <td>
+        <q>There was a problem with your facebook credentials. Please try again later.</q><br>
+        The provided access token is likely expired.
+        This is usually handled by the native Facebook app (so a new facebook access token should be requested), but it might also happen if the Facebook server is not (yet) up to date.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">18</td>
+      <td>
+        <q>Unknown problem when communicating with facebook. Please try again later.</q><br>
+        The Facebook servers are currently unreachable from the dealini backend.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">19</td>
+      <td>
+        <q>You need a valid verified email address to signup.</q><br>
+        If the user's Facebook email is not validated, he cannot login with dealini.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">20</td>
+      <td>
+        <q>Invalid email address</q><br>
+        Our backend does not consider the provided email to be a valid email address (based on some regular expression).
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">21</td>
+      <td>
+        <q>Email address forbidden</q><br>
+        The provided email domain is on our blacklist (mostly one-time trash email providers).
+        The user must use another email address.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">22</td>
+      <td>
+        <q>Password too short</q><br>
+        The password must contain at least 6 characters.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">23</td>
+      <td>
+        <q>User already exists</q><br>
+        A user with the same email address is already registered.
+        The client should offer the user to re-send the confirmation email or request a new password.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">24</td>
+      <td>
+        <q>User does not exist</q><br>
+        No user with this id has ever existed.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">25</td>
+      <td>
+        <q>Invalid access_token</q><br>
+        There are several reasons possible:
+        <ul>
+          <li>The Facebook access token has expired.</li>
+          <li>The user is not connected to the dealini Facebook app.</li>
+          <li>The user has rejected one of the required Facebook permissions (currently only `email`)</li>
+      </td>
+      <td align="right">400</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">26</td>
+      <td>
+        <q>Username too short</q><br>
+        The username must contain at least one non-blank character.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">27</td>
+      <td>
+        <q>Invalid confirmation code</q><br>
+        The user tried to verify with an invalid verification code.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">28</td>
+      <td>
+        <q>This facebook account is already connected with another account.</q><br>
+        This error happens when you try to connect a user with a Facebook account, but the Facebook account is already connected to another user.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">20004</td>
+      <td>
+        <q>Please sign up for the newsletter to register</q><br>
+        For the case where a sync to the Funworld API (from MediaMarkt) is done, it is necessary to accept the newsletter
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+Default attributes:
+
+*   `id` *(int)*:
+        ID of the user
+*   `username` *(string, maxlength: 50)*:
+        Freely chosen username of the user
+*   `image` *(Image)*:
+        Location of the users image
+*   `status_message` *(string, maxlength: 80)*:
+        Freely setable status message
+
+Optional Attributes:
+
+*   `push_notification_channel` *(string)*:
+        Unique name of the user-specific Parse channel name for push notifications
+*   `email` *(string, maxlength: 200)*:
+        Valid email of the user. This is "null" for anonymous users
+*   `first_name` *(string, optional, maxlength: 60)*
+*   `last_name` *(string, optional, maxlength: 100)*
+*   `home_town` *(string, optional, maxlength: 100)*
+*   `phone` *(string, optional)*
+*   `birthday` *(isodatetime, optional)*
+*   `settings` *(Settings object)*:
+        The individual settings of the user, described below in *Settings of a User*
+*   `number_of_common_friends` *(int, optional)*:
+        Relative to the logged-in user, gives the number of common friends (null: the other user is a friend).
+        This is only set when searching for users (/users?q=...).
+*   `facebook_connect` *(bool)*:
+        If the user is already conneted to a facebook account
+*   `number_of_trades` *(int)*:
+        All trades where the user is part of (including suggested, cancelled and closed trades)
+*   `free_chips` *(int)*:
+        Number of chips the user can still use for daily prizes.
+*   `daily_prize_users` *(DailyPrizeUser objects)*:
+        If the user did set some of his chips on daily prizes, they are listed here.
+*   `status` *(string, optional)*
+        Shows if a user is verified or not. Can either be "verified" or "unverified".
+*   `language` *(string, optional)*:
+        The default language of a user.
+*   `email_verified` *(string, optional)*:
+        Determines if a users e-mail has been verified with a verification link. Can be `verified` or `unverified`.
+*   `group_id`  *(int, optional)*:
+        If a user is connected to other users they share the same `group_id`.
+
+## User [/users/{id}]
+
+One user of dealini.ch.
+When fetching a single user, the default and the optional attributes are returned.
+
++ Model (application/json)
 
     + Body
 
             {
-                "question": "How has your experience been ?",
-                "published_at": "2015-08-05T08:40:51.620Z",
-                "choices": [
+                "user": {
+                    "status_message": "Hello World",
+                    "username": "dealinitest1",
+                    "image": "<Image(50, 50)>",
+                    "id": 4809,
+                    "email": "dealinitest1@dealini.ch",
+                    "title": "Mr",
+                    "first_name": "Dealini",
+                    "last_name": "Testuser",
+                    "phone": "+41445201122",
+                    "birthday": "2011-11-21T00:00:00",
+                    "settings": null,
+                    "number_of_common_friends": null,
+                    "push_notification_channel": "56171a345483545d823bf3fab4a6ac2b453f0b3f822386360b0561f7748bd967",
+                    "facebook_connect": false,
+                    "number_of_trades": 55,
+                    "free_chips": 0,
+                    "daily_prize_users": [
+                        {
+                            "user_id": 4809,
+                            "daily_prize_id": 1,
+                            "chips": 4
+                        }
+                    ]
+                }
+            }
+
+### Retrieve a User [GET]
+
++ Parameters
+
+    + id (int, required, `4809`)
+
+        The id of the `user` to retrieve.
+        Use `current` for the logged-in user.
+
++ Response 200
+
+    [User][]
+
+### Update a User [PUT]
+
+Read-only fields are:
+
+*   `id`
+*   `number_of_common_friends`
+        Adding or deleting friends changes this value
+*   `push_notification_channel`
+*   `settings`
+        Can be changed, see below
+*   `facebook_connect`
+*   `number_of_trades`
+
+Write-only fields are:
+
+*   `password` *(string, minlength: 6)*:
+        New user-chosen password
+*   `fb_access_token` *(string)*:
+        Valid facebook access token, account will be connected.
+
++ Parameters
+
+    + id (int, required, `4809`)
+
+        ID of the user
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "email": "dealinitest1@dealini.ch",
+                "password": "bla123"
+            }
+
++ Response 200
+
+    [User][]
+
+## User collection [/users{?q,type}]
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "users": [
                     {
-                        "choice": "1488",
-                        "votes": 0
-                    }, {
-                        "choice": "Python",
-                        "votes": 0
-                    }, {
-                        "choice": "Objective-C",
-                        "votes": 0
-                    }, {
-                        "choice": "Ruby",
-                        "votes": 0
+                        "status_message": "Hello World",
+                        "username": "dealinitest1",
+                        "image": <Image(50, 50)>,
+                        "id": 4809
                     }
                 ]
+            }
+
+### Create a new User [POST]
+
+Create a new user.
+Will also return a valid new session.
+
+Available parameters:
+
+*   `username` *(string, maxlength: 50)*:
+        Will be used as the displayed name in the game.
+*   `email` *(string, valid email, maxlength: 200)*:
+        The new login name of the user
+*   `password` *(string, minlength: 6)*:
+        The new password of the user
+*   `fb_access_token` *(string, fb access token)*:
+        An authorized Facebook access token for the user
+*   `device_identifier` *(string, maxlength: 200)*:
+        A unique device identifing token, used to create a restricted, anonymous user
+*   `newsletter` *(bool, mandatory if used with MM Funworld API)*:
+        Register the user for the newsletter. Mandatory for the MediaMarkt campaign, optinal otherwise.
+
++ Request Sign up with E-Mail and Password (application/json)
+
+        {
+            "email": "dealinitest1@dealini.ch",
+            "password": "de-a-lini",
+            "username": "Dealini Test"
+        }
+
++ Request Sign up with FB token (application/json)
+
+        {
+            "fb_access_token": "AAACukElzvo0BALBn7XKCA6ZAnJ5MZCaDV6JJK4f0XDVUENgqGyRRWLXAUV4yL8MnHaw4JUCzFvBZC7if9ZAsIoVhIuv3TljWxNKVY83eJR6sTX6pOZBqs"
+            "username": "Dealini Test"
+        }
+
++ Request Sign up with device_identifier (application/json)
+
+        {
+            "device_identifier": "anystringwhichisunique"
+        }
+
++ Response 200
+
+    [User][]
+
+### Search for Users [GET]
+
++ Parameters
+
+    + q (string, required, `dealinitest1`)
+
+        Searches for exact matches of email and fuzzy matches of username and first+lastname.
+        When called as a admin (from the dashboard), all fields are fuzzy matched and additional fields are searched.
+
+    + type (string, optional, `suggested_friends`)
+
+        When trying to find "suggested friends", this must be set to `suggested_friends`.
+        Will return up to 10 suggested friends based on the count of common friends (dealini and facebook friends).
+
++ Response 200
+
+    [User collection][]
+
+## Cards of a User [/users/{user_id}/cards{?deal_id,include_redeemed_cards}]
+
+A user has cards which can be traded with other users.
+
+### Retrieve all Cards of a User [GET]
+
+By default only tradeable cards are returned.
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user for which we want to fetch the cards.
+        Use `current` for the logged-in user.
+
+    + deal_id (int, optional, `42`)
+
+        Filter cards by this dealid
+
+    + include_redeemed_cards (bool, optional, `false`)
+
+        Returns also the redeemed cards, adding the field `quantity_redeemed`
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "cards": [
+                    {
+                        "user_id": 4809,
+                        "deal_id": 1012,
+                        "number": 1,
+                        "quantity": 2
+                    },
+                    {
+                        "user_id": 4809,
+                        "deal_id": 1012,
+                        "number": 2,
+                        "quantity": 1
+                    },
+                    {
+                        "user_id": 4809,
+                        "deal_id": 1013,
+                        "number": 3,
+                        "quantity": 1
+                    }
+                ]
+            }
+
+## Friend of a User [/users/{user_id}/friendships/{friend_id}]
+
+### Delete a Friend [DELETE]
+
+Always "works", even if they were no friends
+
++ Parameters
+
+    + user_id (int, required, `current`)
+
+        The user who is deleting the friend request.
+        Use `current` for the logged-in user.
+
+    + friend_id (int, required, `631`)
+
+        The user who is being removed from the friends.
+
++ Response 204
+
+## Friend collection of a User [/users/{user_id}/friendships]
+
+### Retrieve all Friends of a User [GET]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user for which we want to fetch the friendships.
+        Use `current` for the logged-in user.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "friendships": [
+                    {
+                        "friend_id": 631,
+                        "user_id": 4809,
+                        "friend": {
+                            "username": "Matthias©",
+                            "image": <Image(50, 50)>,
+                            "id": 631,
+                            "status_message": "Hello World"
+                        }
+                    }
+                ]
+            }
+
+### Add a Friend [POST]
+
+Only works if a pending friend request is waiting.
+Will issue a push notification (code=4) to the user.
+
++ Parameters
+
+    + user_id (int, required, `current`)
+
+        The user who is accepting the friend request.
+        Use `current` for the logged-in user.
+
++ Request (application/json)
+
+        {
+            "friend_id": 631
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "friendship": {
+                    "friend_id": 631,
+                    "user_id": 4809,
+                    "friend": {
+                        "username": "Matthias©",
+                        "image": <Image(50, 50)>,
+                        "id": 631,
+                        "status_message": "Hello World"
+                    }
+                }
+            }
+
+## Settings of a User [/users/{user_id}/settings]
+
+### Retrieve all Settings [GET]
+
+If the settings of another than the logged-in user are checked, only the public settings are returned.
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user for which we want to fetch the settings.
+        Use `current` for the logged-in user.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "settings": {
+                    "billing_address": {
+                        "city": null,
+                        "first_name": null,
+                        "last_name": null,
+                        "country_iso_code": "CH",
+                        "title": "Mr",
+                        "street": null,
+                        "postal_code": null,
+                        "birthday": "1984-12-31",
+                        "company_name": ""
+                    },
+                    "use_billing_address_as_shipping_address": true,
+                    "contest_answered": false,
+                    "newsletter": true,
+                    "shipping_address": {
+                        "city": null,
+                        "first_name": null,
+                        "last_name": null,
+                        "country_iso_code": "CH",
+                        "title": "Mr",
+                        "street": null,
+                        "postal_code": null,
+                        "birthday": null,
+                        "company_name": ""
+                    }
+                }
+            }
+
+### Update a Setting [PUT]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user for which we want to update the settings.
+        Use `current` for the logged-in user.
+
++ Request (application/json)
+
+        {
+            "billing_address": {
+                "city": "Stadt",
+                "first_name": "Max",
+                "last_name": "Mustermann",
+                "country_iso_code": "CH",
+                "title": "Mr",
+                "street": "Strasse 1",
+                "postal_code": 1234
+            }
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "settings": {
+                    "billing_address": {
+                        "city": "Stadt",
+                        "first_name": "Max",
+                        "last_name": "Mustermann",
+                        "country_iso_code": "CH",
+                        "title": "Mr",
+                        "street": "Strasse 1",
+                        "postal_code": "1234",
+                        "birthday": "1984-12-31",
+                        "company_name": ""
+                    },
+                    "use_billing_address_as_shipping_address": true,
+                    "contest_answered": false,
+                    "newsletter": true,
+                    "shipping_address": {
+                        "city": null,
+                        "first_name": null,
+                        "last_name": null,
+                        "country_iso_code": "CH",
+                        "title": "Mr",
+                        "street": null,
+                        "postal_code": null,
+                        "birthday": null,
+                        "company_name": ""
+                    }
+                }
+            }
+
+
+# Group FriendRequests
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">160</td>
+      <td>
+        <q>The users are already friends</q><br>
+        A friend request can only be made to users who are not already friends.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">161</td>
+      <td>
+        <q>No pending friend request from other user</q><br>
+        To accept a friend request, there must be a pending friend request from the other user.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## FriendRequest [/users/{user_id}/friendRequests/{friend_id}]
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "friendRequest": {
+                    "addressee_id": 631,
+                    "requester_id": 4809,
+                    "time_created": "2014-04-04T23:59:59",
+                }
+            }
+
+### Reject a FriendRequest [DELETE]
+
++ Parameters
+
+    + user_id (int, required, `current`)
+
+        The user who wants to reject the friend request.
+        Use `current` for the logged-in user.
+
+    + friend_id (int, required, `631`)
+
+        The user who is being rejected.
+
++ Response 204
+
+## FriendRequest collection [/users/{user_id}/friendRequests]
+
+Alternative URL: `/friendRequests`
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "friendRequests": [
+                    {
+                        "addressee_id": 4809,
+                        "requester_id": 631,
+                        "time_created": "2014-04-04T23:59:59",
+                        "requester": {
+                            "id": 631,
+                            "username": "Matthias",
+                            "image": <Image(50, 50)>,
+                            "status_message": "Hello World"
+                        }
+                    }
+                ]
+            }
+
+### Retrieve pending FriendRequests [GET]
+
+Returns only friend requests which can be accepted by the user.
+
++ Parameters
+
+    + user_id (int, required, `current`)
+
+        The user for which we want to fetch the settings.
+        Use `current` for the logged-in user.
+
++ Response 200
+
+    [FriendRequest collection][]
+
+### Create a new FriendRequest [POST]
+
+Will issue a push notification to the addressee (code=3)
+
++ Parameters
+
+    + user_id (int, required, `current`)
+
+        The user for which we want to fetch the settings.
+        Use `current` for the logged-in user.
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "addressee_id": 631
+            }
+
++ Response 200
+
+    [FriendRequest][]
+
+
+# Group Codes
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">170</td>
+      <td>
+        <q>Code already used by you</q><br>
+        The provided code has already been used by the logged-in user.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">171</td>
+      <td>
+        <q>Code already used by another user</q><br>
+        The provided code has already been used by someone other then the logged-in user.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">172</td>
+      <td>
+        <q>Code does not exist</q><br>
+        The provided code has never existed in our database.
+      </td>
+      <td align="right">404</td>
+    </tr>
+  </tbody>
+</table>
+
+## Code [/codes/{code}]
+
+### Use a Code [DELETE]
+
+A used code is turned into a card or an instant prize.
+
++ Parameters
+
+    + code (string, required, `AAAABBBBCCCC`)
+
+        The code which should be converted into the card or instant prize
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "code": {
+                    "type": "card",
+                    "code": "AAAABBBBCCCC",
+                    "card_unit": {
+                        "deal_id": 1012,
+                        "number": 1,
+                        "image": <Image(66, 88)>,
+                        "name": "04.1"
+                    }
+                    "instant_prize_card": null
+                }
+            }
+
+
+# Group Credits
+
+Credits represent flowpacks or special offers which the user can use to get more cards.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">30</td>
+      <td>
+        <q>Access denied to credits of another user</q><br>
+        The logged-in user does not own the requested credit.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">31</td>
+      <td>
+        <q>Credit already used</q><br>
+        A credit can only be used once.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">237</td>
+      <td>
+        <q>Not enough dollarini</q><br>
+        The user does not have enough dollarini to buy a credit.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## Credit [/users/{user_id}/credits/{credit_id}]
+
+### Use a Credit [DELETE]
+
+When a credit is used, either one specific card or several cards (3 right now) are given to the user.
+This is reported as a list of `card_units` and `instant_prize_cards` which are added to the `credit`.
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user owning the credit
+
+    + credit_id (int, required, `1`)
+
+        The id of the credit which should be used
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "credit": {
+                    "id": 1,
+                    "user_id": 4809,
+                    "card_units": [
+                        {
+                            "image": <Image(66, 88)>,
+                            "deal_id": 1012,
+                            "number": 1,
+                            "name": "04.1"
+                        },
+                        {
+                            "image": <Image(66, 88)>,
+                            "deal_id": 1012,
+                            "number": 2,
+                            "name": "04.2"
+                        }
+                    ]
+                    "instant_prize_cards": [
+                        {
+                            "id": 1,
+                            "name": "Eat.ch 5 CHF Gutschein",
+                            "image_card": <Image(66, 88)>
+                        }
+                    ]
+                }
+            }
+
+## Credit collection [/users/{user_id}/credits]
+
+### Retrieve unredeemed Credits of a User [GET]
+
+These credits are usually given to the user when he buys one or multiple flowpacks.
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user owning the credit
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "credits": [
+                    {
+                        "id": 1,
+                        "user_id": 4809
+                    }
+                ]
+            }
+
+### Buy Credits with Dollarini [POST]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The logged-in user
+
++ Request (application/json)
+
+        {
+            "dollarinis": 4
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "credits": [
+                    {
+                        "id": 1,
+                        "user_id": 4809
+                    }
+                ]
+            }
+
+
+# Group InstantPrizeCards
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">180</td>
+      <td>
+        <q>Forbidden to access instant prize card belonging to another user</q><br>
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## InstantPrizeCard [/instantPrizeCards/{cardid}]
+
+The instant prize itself is included by default
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "instantPrizeCard": {
+                    "id": 1,
+                    "instant_prize": {
+                        "id": 1,
+                        "name": "Eat.ch 5 CHF Gutschein",
+                        "image_product": <Image(400, 300)>,
+                        "image_card": <Image(66, 88)>,
+                        "description": "Hol dir jetzt dein Essen nach Hause und spare dabei 5 CHF!",
+                        "terms_html": "<ul><li>Nicht kummulierbar</li><li>Gültig bis 31.12.2014</li></ul>",
+                        "how_to_html": "<h1>So funktionierts</h1><p>Du musst einfach auf eat.ch gehen, bestellen und den Gutscheincode eingeben.</p>",
+                        "company_address": {
+                            "company_name": "Eat.ch",
+                            "street": "Strasse 1",
+                            "city": "Zürich",
+                            "postal_code": "8000",
+                            "country_iso_code": "CH"
+                        }
+                        "redemption_type": "code",
+                        "redemption_infos": {
+                            "shop_url": "http://www.eat.ch"
+                        },
+                    },
+                    "user": {
+                        "username": "dealinitest1",
+                        "image": <Image(50, 50)>,
+                        "id": 4809,
+                    }
+                    "redemption_info": {
+                        "code": "abc123def"
+                    },
+                    "delivery_details": {
+                        "email": "test@example.com"
+                    },
+                    "webview_url": "http://sticker.dealini.ch/#1"
+                }
+            }
+
+### Retrieve an InstantPrizeCard [GET]
+
++ Parameters
+
+    + cardid (int, required, `1`)
+
+        The ID of the instant prize card
+
++ Response 200
+
+    [InstantPrizeCard][]
+
+### Update the delivery_details [PUT]
+
++ Parameters
+
+    + cardid (int, required, `1`)
+
+        The ID of the instant prize card
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "delivery_details": {
+                    "email": "test@example.com"
+                }
+            }
+
++ Response 200
+
+    [InstantPrizeCard][]
+
+## InstantPrizeCard collection [/users/{user_id}/instantPrizeCards]
+
+### Retrieve all InstantPrizeCards of a User [GET]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The ID of the user owning the cards
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "instantPrizeCards": [
+                    {
+                        "id": 1,
+                        "instant_prize": {
+                            "id": 1,
+                            "name": "Eat.ch 5 CHF Gutschein",
+                            "image_card": <Image(66, 88)>
+                        },
+                        "webview_url": "http://sticker.dealini.ch/#1"
+                    }
+                ]
+            }
+
+## Redeem an Instantprize [/instantPrizeCards/code/{code}]
+
+### Redeem an Instantprize [DELETE]
+
++ Paramaeters
+
+    + code (CHAR, required, 'SLCIEMDSI')
+
+        The Code that a user uses
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "instasntPrizeCards": [
+                    {
+                        "id": 1,
+                        "webview_url": "http://sticker.dealini.ch/#1"
+                        "instant_prize": {
+                             "id": 1,
+                             "name": "Eat.ch 5 CHF Gutschein",
+                             "image_card": <Image(66, 88)>
+                         },
+                        "redeemed": true,
+                    }
+                ]
+            }
+
+# Group Deals
+
+A deal is an offer which can be redeemed if a certain amount of distinct cards have been collected.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">40</td>
+      <td>
+        <q>Card not found</q><br>
+        The card does not exist in the database (anymore).
+        When a deal cannot be collected anymore, the unsold cards are removed.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">50</td>
+      <td>
+        <q>No Deal found</q><br>
+        This deal never existed or the search returned no results.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">51</td>
+      <td>
+        <q>Cannot access deal</q><br>
+        This deal is not yet active.
+      </td>
+      <td align="right"></td>
+    </tr>
+  </tbody>
+</table>
+
+## Deal [/deals/{id}]
+
+Deals are products for which the user can collect cards and, by doing that, earn a discount on the product.
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the deal
+*   `name` *(string)*:
+        Short name of the deal
+*   `image_logo` *(Image)*:
+        The logo of the deal.
+*   `image_logo_stickers` *(Image)*:
+        The logo of the deal on a Sticker.
+*   `image_overview` *(Image)*:
+        The image which is displayed when showing a list of deals.
+*   `image_featured` *(Image)*:
+        The image to display when this deal is featured.
+*   `rank` *(int)*:
+        Used for ordering multiple deals, e.g. in the album.
+        A lower rank equals higher position (e.g. rank 1 = topmost deal)
+*   `likes` *(int)*:
+        Number of peoples who favourited this deal
+*   `number` *(int)*:
+        The identifier for this deal in numeric form for display purposes.
+*   `featured` *(bool)*:
+        If the deal should be featured (highlighted) in the album overview
+*   `brand` *(string, maxlength: 50)*:
+        Name of the brand which the deal belongs to.
+*   `category_id` *(int)*:
+        ID of the category the deal belongs to.
+*   `amount_of_distinct_cards` *(int)*:
+        How many cards have to be collected to redeem the deal.
+*   `variable_pricing` *(bool)*:
+        The products for this deal have changing prices which must be drawn using DealPrices before redemption.
+*   `overview_web` *(Image)*:
+        Defines the size of an image in the Album Overview
+
+Optional attributes, which (except for the `product` field) are returned by default:
+
+*   `attributes` *(list of dicts)*:
+        The possible choices for products for this deal
+*   `products` *(list of dicts)*:
+        All valid products for this deal
+*   `show_in_album` *(bool)*:
+        If the deal should be visible in the overview of deals ("album")
+*   `time_redeem_end` *(isodatetime)*:
+        Real end - no redemption anymore
+*   `image_background` *(Image)*:
+        The file which can be used as a background image when showing the deal details
+*   `image_background_web` *(Image)*:
+        Similar to image_background with better resolution
+*   `image_logo_with_background` *(Image)*:
+        The logo (from image_logo) placed on an image, e.g. a circle
+*   `image_logo_background` *(Image)*:
+        The logo which should be placed on the deal content page
+*   `image_logo_stickers` *(Image)*:
+        The logo which should be placed in the sticker tab
+*   `product_images` *(list of Image)*:
+        Different shots of the product or the brand
+*   `tint_color` *(string, "#FFFFFF")*:
+        Hex-coded color of the deal
+*   `longdesc` *(string)*:
+        Description of the deal
+*   `title` *(string)*:
+        Title of the deal
+*   `terms` *(string)*:
+        Terms of the deal
+*   `plain_link_url` *(string)*:
+        Link to the brandpartner page
+*   `link_url` *(string)*:
+        Link to the brandpartner page with tracking
+*   `link_name` *(string)*:
+        Display text for link to the brandpartner page
+*   `sticker_text` *(string, maxlength: 300)*:
+        Text on the virtual cards
+*   `slug` *(string, unique, maxlength: 50)*:
+        naming of the last part of link of the deal details
+*   `dealini_presents` *(bool)*:
+        If the deal should be labeled as recommendation in the deals overview
+*   `max_per_user` *(int)*:
+        Amount of maximum orders per user
+*   `daily_prize` *(boolean)*:
+        If a deal is a daily prize.
+
+Admin attributes:
+
+*   `time_start` *(isodatetime)*:
+        Starting time of the deal
+*   `time_end` *(isodatetime)*:
+        End of the deal - can still be redeemed
+*   `total_amount_of_cards` *(int)*:
+        Amount of physical cards which are circulating
+*   `subject_id` *(int)*:
+        ID for card printing
+*   `bp_email` *(string, maxlength: 200)*:
+        Email of the executive person of the brandpartner
+*   `bp_stats_link` *(string)*:
+        Link to the deal statistics page
+*   `admin_bp_stats_link` *(string)*:
+        Link to the advanced deal statistics page
+*   `export_password` *(string)*:
+        Password to export all deal orders
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "deal": {
+                    "id": 1012,
+                    "name": "Mein Essen",
+                    "title": "ist immer das beste Essen",
+                    "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                    "terms": "Niederlassung in der Schweiz, Vorkasse",
+                    "image_logo": <Image(100, 35, fit)>,
+                    "image_logo_background": <Image(100, 35, fit)>,
+                    "image_logo_stickers": <Image(100, 35, fit)>,
+                    "image_overview": <Image(320, 130)>,
+                    "rank": 1,
+                    "likes": 896,
+                    "number": 35,
+                    "category_id": 1,
+                    "featured": false,
+                    "show_in_album": true,
+                    "amount_of_distinct_cards": 4,
+                    "time_start": "2050-12-31T23:59:59",
+                    "time_end": "2051-12-31T23:59:59",
+                    "time_redeem_end": "2051-11-31T23:59:59",
+                    "image_background": <Image(320, 568)>,
+                    "image_featured": <Image(320, 180)>,
+                    "image_logo_with_background": <Image(46, 46)>,
+                    "product_images": [
+                        <Image(320, 200)>,
+                        <Image(320, 200)>
+                    ],
+                    "tint_color": "#d9ac7c",
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "name": "Art",
+                            "values": [
+                                {"id": "1", "name": "Indisch"},
+                                {"id": "3", "name": "Schweiz"},
+                                {"id": "2", "name": "Tessin"}
+                            ]
+                        }
+                    ],
+                }
+            }
+
+### Retrieve a Deal [GET]
+
++ Parameters
+
+    + id (int, required, `1012`)
+
+        ID of the deal
+
++ Response 200
+
+    [Deal][]
+
+### Update a Deal [PUT]
+
++ Parameters
+
+    + id (int, required, `1012`)
+
+        ID of the deal
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "deal": {
+                    "name": "Mein Essen",
+                    "title": "ist immer das beste Essen",
+                    "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                    "terms": "Niederlassung in der Schweiz, Vorkasse",
+                    "image_logo": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "image_overview": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "rank": 1,
+                    "number": 35,
+                    "category_id": 1,
+                    "featured": false,
+                    "show_in_album": true,
+                    "amount_of_distinct_cards": 4,
+                    "time_start": "2050-12-31T23:59:59",
+                    "time_end": "2051-12-31T23:59:59",
+                    "time_redeem_end": "2051-11-31T23:59:59",
+                    "image_background": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "image_featured": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "product_images": [
+                        "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                        "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png"
+                    ],
+                    "tint_color": "#d9ac7c",
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "name": "Art",
+                            "values": [
+                                {"id": "1", "name": "Indisch"},
+                                {"id": "3", "name": "Schweiz"},
+                                {"id": "2", "name": "Tessin"}
+                            ]
+                        }
+                    ],
+                    "products": [
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 1
+                            },
+                            "id": 1,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        },
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 2
+                            },
+                            "id": 3,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        },
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 3
+                            },
+                            "id": 4,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        }
+                    ]
+                }
+            }
+
++ Response 200
+
+            {
+                "deal": {
+                    "name": "Mein Essen",
+                    "title": "ist immer das beste Essen",
+                    "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                    "terms": "Niederlassung in der Schweiz, Vorkasse",
+                    "image_logo": <Image(100, 35, fit)>,
+                    "image_overview": <Image(320, 130)>,
+                    "rank": 1,
+                    "number": 35,
+                    "category_id": 1,
+                    "featured": false,
+                    "show_in_album": true,
+                    "amount_of_distinct_cards": 4,
+                    "time_start": "2050-12-31T23:59:59",
+                    "time_end": "2051-12-31T23:59:59",
+                    "time_redeem_end": "2051-11-31T23:59:59",
+                    "image_background": <Image(320, 568)>,
+                    "image_featured": <Image(320, 180)>,
+                    "image_logo_with_background": <Image(46, 46)>,
+                    "product_images": [
+                        <Image(320, 200)>,
+                        <Image(320, 200)>
+                    ],
+                    "tint_color": "#d9ac7c",
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "name": "Art",
+                            "values": [
+                                {"id": "1", "name": "Indisch"},
+                                {"id": "3", "name": "Schweiz"},
+                                {"id": "2", "name": "Tessin"}
+                            ]
+                        }
+                    ],
+                }
+            }
+
+## Deal collection [/deals]
+
+### Retrieve all active Deals [GET]
+
++ Response 200 (application/json)
+
+    + Headers
+
+            Cache-Control: max-age=3600
+            Date: Tue, 22 Apr 2014 15:46:23 GMT
+            Expires: Tue, 22 Apr 2014 16:46:23 GMT
+
+    + Body
+
+            {
+                "deals": [
+                    {
+                        "id": 1012,
+                        "name": "Mein Essen",
+                        "title": "ist immer das beste Essen",
+                        "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                        "terms": "Niederlassung in der Schweiz, Vorkasse",
+                        "image_logo": <Image(100, 35, fit),
+                        "image_overview": <Image(320, 130)>,
+                        "image_featured": <Image(320, 180)>,
+                        "rank": 1,
+                        "likes": 0,
+                        "number": 4,
+                        "category_id": 7,
+                        "featured": true
+                    }
+                ]
+            }
+
+### Create a new Deal [POST]
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "deal": {
+                    "name": "Mein Essen",
+                    "title": "ist immer das beste Essen",
+                    "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                    "terms": "Niederlassung in der Schweiz, Vorkasse",
+                    "image_logo": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "image_overview": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "rank": 1,
+                    "number": 35,
+                    "category_id": 1,
+                    "featured": false,
+                    "show_in_album": true,
+                    "amount_of_distinct_cards": 4,
+                    "time_start": "2050-12-31T23:59:59",
+                    "time_end": "2051-12-31T23:59:59",
+                    "time_redeem_end": "2051-11-31T23:59:59",
+                    "image_background": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "image_featured": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                    "product_images": [
+                        "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                        "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png"
+                    ],
+                    "tint_color": "#d9ac7c",
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "name": "Art",
+                            "values": [
+                                {"id": "1", "name": "Indisch"},
+                                {"id": "3", "name": "Schweiz"},
+                                {"id": "2", "name": "Tessin"}
+                            ]
+                        }
+                    ],
+                    "products": [
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 1
+                            },
+                            "id": 1,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        },
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 2
+                            },
+                            "id": 3,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        },
+                        {
+                            "price_in_cents": 10000,
+                            "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                            "configuration": {
+                                "1": 3
+                            },
+                            "id": 4,
+                            "name": "Gutschein für eine Mahlzeit",
+                            "requires_shipping_address": true,
+                            "min_age": null
+                        }
+                    ]
+                }
+            }
+
++ Response 200
+
+            {
+                "deal": {
+                    "id": 1012,
+                    "name": "Mein Essen",
+                    "title": "ist immer das beste Essen",
+                    "longdesc": "Gekocht mit viel Liebe und Leidenschaft zum Essen",
+                    "terms": "Niederlassung in der Schweiz, Vorkasse",
+                    "image_logo": <Image(100, 35, fit)>,
+                    "image_overview": <Image(320, 130)>,
+                    "rank": 1,
+                    "likes": 896,
+                    "number": 35,
+                    "category_id": 1,
+                    "featured": false,
+                    "show_in_album": true,
+                    "amount_of_distinct_cards": 4,
+                    "time_start": "2050-12-31T23:59:59",
+                    "time_end": "2051-12-31T23:59:59",
+                    "time_redeem_end": "2051-11-31T23:59:59",
+                    "image_background": <Image(320, 568)>,
+                    "image_featured": <Image(320, 180)>,
+                    "product_images": [
+                        <Image(320, 200)>,
+                        <Image(320, 200)>
+                    ],
+                    "tint_color": "#d9ac7c",
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "name": "Art",
+                            "values": [
+                                {"id": "1", "name": "Indisch"},
+                                {"id": "3", "name": "Schweiz"},
+                                {"id": "2", "name": "Tessin"}
+                            ]
+                        }
+                    ]
+                }
+            }
+
+# Group FeaturedContent
+
+The primary image and action which should be shown in the album
+
+## FeaturedContent [/featuredContent]
+
+A daily prize is a prize where the user can use his chips as entries into the prize drawing.
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the daily prize
+*   `image` *(Image)*:
+        The picture to show
+*   `action` *(object)*:
+        An object telling the app where to link to when the image is tapped.
+        Can have the keys "daily_prizes" (true/false) or "dealid" (int)
+
+Optional Attributes:
+
+*   `time_start` *(datetime)*:
+        The time from when on the daily prize is available
+*   `time_end` *(datetime)*:
+        The time the daily prize winner is drawn
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "featuredContent": {
+                    "id": 1,
+                    "image": <Image(392, 250)>,
+                    "action": {
+                        "daily_prizes": true
+                    }
+                }
+            }
+
+### Retrieve the current featured content [GET]
+
++ Response 200
+
+    [FeaturedContent][]
+
+# Group DailyPrize
+
+For every scanned sticker the user gets a "chip". These chips can be set on the daily prizes and
+constitute a chance in winning this daily prize. Daily prizes are drawn every day during the campaign.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">310</td>
+      <td>
+        <q>Cannot change daily_prize_chips for another user</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">311</td>
+      <td>
+        <q>You don't have enough chips, scan more sticker to get additional chips.</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">312</td>
+      <td>
+        <q>Invalid number of chips provided. Chips cannot be reduced.</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">313</td>
+      <td>
+        <q>This user already set chips on the daily prize, use PUT instead</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">314</td>
+      <td>
+        <q>The user did not yet set any chips on this daily prize</q>
+      </td>
+      <td align="right">404</td>
+    </tr>
+  </tbody>
+</table>
+
+## DailyPrize [/dailyPrizes/{id}]
+
+A daily prize is a prize where the user can use his chips as entries into the prize drawing.
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the daily prize
+*   `brand` *(string)*:
+        Brand of the daily prize
+*   `title` *(string)*:
+        Title of the daily prize (50 signs)
+*   `desc` *(string)*:
+        A long description of the daily prize (50 words)
+*   `about` *(string)*:
+        A long text about the brand and/or prize (150 words)
+*   `about_short` *(string)*:
+        A shorter version of the about text for mobile devices
+*   `link_name` *(string)*:
+        Display name of the URL
+*   `image_background` *(Image)*:
+        The image which is displayed behind the title in the daily prize overview
+*   `image_logo` *(Image)*:
+        The logo image (served as png)
+*   `background_images` *(list of Image)*:
+        The background images for the detail page.
+*   `time_drawing` *(isodatetime)*:
+        When the drawing of the prize will take place. Afterwards there are winners available.
+*   `winners` *(list of str)*:
+        A list of strings int he format "user from city" which did win the prize.
+*   `total_chip_count` *(int)*:
+        Number of chips already being used to win this deal
+*   `chip_count_this_week *(int)*:
+        Number of chips that were set on this daily prize the last 7 days
+*   `time_start` *(datetime)*:
+        The time from when on a user can bet on this daily prize
+*   `time_end` *(datetime)*:
+        The time from when on a user cannot bet on a daily prize anymore
+
+
+Optional Attributes:
+
+*   `link_url_plain` *(VARCHAR, maxlength: 500)*:
+        Target URL for the external URL. Usually a redirect-url for tracking
+
+*   `background_images_mobile` *(list of Image)*:
+        The background images for the detail page on mobile.
+
+*   `product_images` *(list of Image)*:
+        The product images for the detail page
+
+*   `video` *(string)*:
+        A video about the brand/prize. Usually a youtube embedable video.
+
+*   `nr_participants` *(int)*:
+        The amount of users that bet on this prize.
+
+*   `product_images` *(object)*:
+        Contains links to images that are shown on the product page.
+
+*   `video` *(string)*:
+        A link to a video that can be embeded (usually from youtube).
+
+*   `nr_participants` *(int)*:
+        The amount of participants that bet their chips on a daily prize.
+
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "dailyPrize": {
+                    "id": 1,
+                    "brand": "MeineMarke",
+                    "title": "Ein toller Preis",
+                    "desc": "Mit diesem tollen preis kannst du viele tolle Sachen machen. Toll, oder?",
+                    "about": "Ein gaaaanz langer Text wo wir viel erzählen können.",
+                    "about_short": "Ein nicht ganz so langer Text.",
+                    "link_url": "http://api-geschenkt.dealini.ch/trLinks?redirect_to=http%3A%2F%2Fexample.com",
+                    "link_url_plain": "http://example.com",
+                    "link_name": "Example Page",
+                    "video": "https://www.youtube.com/watch?v=818RUrKUs68",
+                    "image_background": <Image(768, 768)>,
+                    "image_logo": <Image(125, 35)>,
+                    "background_images": [<Image(1920, 670)>],
+                    "background_images_mobile": [<Image(768, 1200)>],
+                    "product_images": [<Image(500, 500)>],
+                    "time_drawing": "2015-09-14T16:00:00",
+                    "winners": ["Emil aus Stadt"],
+                    "total_chip_count": 123
+                }
+            }
+
+### Retrieve a DailyPrize [GET]
+
++ Parameters
+
+    + id (int, required, `1`)
+
+        ID of the daily prize
+
++ Response 200
+
+    [DailyPrize][]
+
+## DailyPrize Collection [/dailyPrizes]
+
+### Retrieve all DailyPrizes [GET]
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dailyPrizes": [
+                    {
+                        "id": 1,
+                        "brand": "MeineMarke",
+                        "title": "Ein toller Preis",
+                        "desc": "Mit diesem tollen preis kannst du viele tolle Sachen machen. Toll, oder?",
+                        "image_background": <Image(768, 768)>,
+                        "image_logo": <Image(125, 35)>,
+                        "time_drawing": "2015-09-14T16:00:00",
+                        "winners": ["Emil aus Stadt"],
+                        "total_chip_count": 123
+                    }
+                ]
+            }
+
+# Group DailyPrizeUsers
+
+Here a user can set chips on a daily prize
+
+## DailyPrizeUser [/users/{user_id}/dailyPrizeUsers/{daily_prize_id}]
+
+A daily prize user represents the chips being set by a user on a daily prize.
+
+Attributes:
+
+*   `user_id` *(int)*:
+        ID of the user
+*   `daily_prize_id` *(int)*:
+        ID of the daily prize
+*   `chips` *(int)*:
+        Number of chips set by the user on this daily prize.
+*   `daily_prize_title` *(text)*:
+        The title of a daily prize.
+*   `daily_prize_time_start` *(isodatetime)*:
+        The time that users can start betting on the daily prize.
+*   `daily_prize_time_drawing` *(isodatetime)*:
+        The time that the winner of a daily prize is drawn.
+*   `daily_prize_time_end` *(isodatetime)*:
+        The time that users cannot bet on a daily prize anymore (usually the same as daily_prize_time_drawing).
+
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "dailyPrizeUser": {
+                    "user_id": 4801,
+                    "daily_prize_id": 1,
+                    "chips": 4
+                    "daily_prize_time_start": "2016-09-18T22:00:00+00:00",
+                    "daily_prize_time_drawing": "2016-09-27T17:00:00+00:00",
+                    "daily_prize_time_end": "2016-09-27T17:00:00+00:00"
+                }
+            }
+
+
+### Get a DailyPrizeUser object [GET]
+
++ Parameters
+
+    + user_id (int, required, `1`)
+
+        ID of the user
+
+    + daily_prize_id (int, required, `4`)
+
+        ID of the daily prize
+
++ Response 200
+
+    [DailyPrizeUser][]
+
+### Update a DailyPrizeUser object - increase the chip count [PUT]
+
++ Parameters
+
+    + user_id (int, required, `1`)
+
+        ID of the user
+
+    + daily_prize_id (int, required, `4`)
+
+        ID of the daily prize
+
++ Request (application/json)
+
+        {
+            "chips": 4
+        }
+
++ Response 200
+
+    [DailyPrizeUser][]
+
+## DailyPrizeUser Collection [/users/{user_id}/dailyPrizeUsers]
+
+### Create a new DailyPrizeUser object to set chips on a daily prize [POST]
+
++ Parameters
+
+    + user_id (int, required, `1`)
+
+        ID of the user
+
++ Request (application/json)
+
+        {
+            "chips": 4,
+            "daily_prize_id": 1
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dailyPrizeUser": {
+                    "daily_prize_id": 1,
+                    "user_id": 4809,
+                    "chips": 4
+                }
+            }
+
+
+# Group DailyPrizeCodes
+
+A code can be exclusively for daily prizes (not for stickers and instant prizes).
+This code can be checked and redeemed with this resource.
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">172</td>
+      <td>
+        <q>Code does not exist</q><br>
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">174</td>
+      <td>
+        <q>Code already used</q><br>
+        This code was already used, potentially by the same user asking
+      </td>
+      <td align="right">404</td>
+    </tr>
+  </tbody>
+</table>
+
+## DailyPrizeCode [/dailyPrizeCodes/{code}]
+
+A daily prize code
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the code
+*   `code` *(int)*:
+        The alphanumerical code itself
+*   `user` *(int)*:
+        The ID of the user that set the code on the daily prize.
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "dailyPrizeCode": {
+                    "id": 1,
+                    "code": "ABCD0001"
+                }
+            }
+
+
+### Check  if a DailyPrizeCode is valid without redeeming [GET]
+
++ Parameters
+
+    + code (int, required, `ABCD0001`)
+
+        The code to be checked
+
++ Response 200
+
+    [DailyPrizeCode][]
+
+## DailyPrizeCode Collection [/dailyPrizeCodes]
+
+### Redeem a dailyPrizeCode [POST]
+
++ Request (application/json)
+
+        {
+            "code": "ABCD0001",
+            "daily_prize_id": 1,
+            "email": "test@example.com",
+            "address": {
+                "title": "Mr",
+                "first_name": "First",
+                "last_name": "Last",
+                "street": "Strasse 1",
+                "postal_code": "1234",
+                "city": "city",
+                "phone": "+41791234567"
+            }
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dailyPrizeCode": {
+                    "id": 1,
+                    "code": "ABCD0001"
+                }
+            }
+
+
+# Group Categories
+
+A deal can have a category.
+
+## Category collection [/categories]
+
+### Retrieve all active Categories [GET]
+
++ Response 200 (application/json)
+
+    + Headers
+
+            Cache-Control: max-age=3600
+            Date: Tue, 22 Apr 2014 15:46:23 GMT
+            Expires: Tue, 22 Apr 2014 16:46:23 GMT
+
+    + Body
+
+            {
+                "categories": [
+                    {
+                        "id": 1,
+                        "name": "Reisen",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/travel.png",
+                        "rank": 1,
+                    },
+                    {
+                        "id": 2,
+                        "name": "Fashion",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/fashion.png",
+                        "rank": 2,
+                    },
+                    {
+                        "id": 3,
+                        "name": "Elektronik",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/electronics.png",
+                        "rank": 3,
+                    },
+                    {
+                        "id": 4,
+                        "name": "Haus & Heim",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/home.png",
+                        "rank": 4,
+                    },
+                    {
+                        "id": 5,
+                        "name": "Auto & Moto",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/automoto.png",
+                        "rank": 5,
+                    },
+                    {
+                        "id": 6,
+                        "name": "Freizeit & Sport",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/fun.png",
+                        "rank": 6,
+                    },
+                    {
+                        "id": 7,
+                        "name": "Essen & Genuss",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/food.png",
+                        "rank": 7,
+                    },
+                    {
+                        "id": 8,
+                        "name": "Beauty & Wellness",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/beauty.png",
+                        "rank": 8,
+                    },
+                    {
+                        "id": 9,
+                        "name": "Luxus",
+                        "icon": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/kiss.png",
+                        "rank": 9,
+                    },
+                ]
+            }
+
+
+# Group CardUnits
+
+A card unit describes the different cards collectable.
+A user can have multiple identical cards, but to redeem a deal it is necessary to have at least one card belonging to each of the card units of the deal.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">50</td>
+      <td>
+        <q>No Deal found</q><br>
+        This deal never existed or the search returned no results.
+      </td>
+      <td align="right">404</td>
+    </tr>
+  </tbody>
+</table>
+
+## CardUnits of a Deal [/cardUnits/{dealid}]
+
+### Retrieve all CardUnits of a Deal [GET]
+
++ Parameters
+
+    + dealid (int, required, `1012`)
+
+        ID of the deal
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "cardUnits": [
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 1,
+                        "name": "04.1"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 2,
+                        "name": "04.2"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 3,
+                        "name": "04.3"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 4,
+                        "name": "04.4"
+                    }
+                ]
+            }
+
+## CardUnit of a Deal [/cardUnits/{dealid}/{number}]
+
+### Update a CardUnit [PUT]
+
++ Parameters
+
+    + dealid (int, required, `1012`)
+
+        ID of the deal
+
+    + number (int, required, `2`)
+
+        Number of the card unit
+
++ Request (application/json)
+
+    + Body
+
+            {
+               "image": "https://s3-eu-west-1.amazonaws.com/dealini-assets/img/redesign/icons/fun.png",
+            }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "cardUnit": {
+                    "image": <Image(66, 88)>,
+                    "deal_id": 1012,
+                    "number": 2,
+                    "name": "04.2"
+                }
+            }
+
+## CardUnit collection [/cardUnits]
+
+Enumerates the different kind of cards available for all active deals.
+
+Attributes:
+
+*   `image` *(Image)*:
+        The image of the card.
+*   `deal_id` *(int)*:
+        ID of the deal this cardunit belongs to
+*   `number` *(int)*:
+        The identifier of the specific card inside a deal
+*   `name` *(string)*:
+        The name of the card that is displayed to the users.
+        Format and content may change
+
+### Retrieve all CardUnits of active Deals [GET]
+
++ Response 200 (application/json)
+
+    + Headers
+
+            Cache-Control: max-age=3600
+            Date: Tue, 22 Apr 2014 15:46:23 GMT
+            Expires: Tue, 22 Apr 2014 16:46:23 GMT
+
+    + Body
+
+            {
+                "cardUnits": [
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 1,
+                        "name": "04.1"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 2,
+                        "name": "04.2"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 3,
+                        "name": "04.3"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1012,
+                        "number": 4,
+                        "name": "04.4"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1013,
+                        "number": 1,
+                        "name": "10.1"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1013,
+                        "number": 2,
+                        "name": "10.2"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1013,
+                        "number": 3,
+                        "name": "10.3"
+                    },
+                    {
+                        "image": <Image(66, 88)>,
+                        "deal_id": 1013,
+                        "number": 4,
+                        "name": "10.4"
+                    }
+                ]
+            }
+
+
+# Group DealLikes
+
+A user can show that he wants to collect a deal by liking it.
+
+## DealLikes [/users/{user_id}/dealLikes/{deal_id}]
+
+### Retrieve all DealLikes of a User [GET]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The ID of the user whoes likes should be fetched.
+        Use `current` for the logged-in user.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dealLikes": [
+                    {
+                        "deal_id": 1012,
+                        "user_id": 4809
+                    },
+                    {
+                        "deal_id": 1013,
+                        "user_id": 4809
+                    }
+                ]
+            }
+
+### Like a Deal [POST]
+
++ Parameters
+
+    + user_id (string, required, `current`)
+
+        The user liking a deal.
+        Only `current` is allowed here.
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "deal_id": 1013,
+                "user_id": 4809
+            }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dealLike": {
+                    "deal_id": 1013,
+                    "user_id": 4809
+                }
+            }
+
+### Unlike a Deal [DELETE]
+
++ Parameters
+
+    + user_id (string, required, `current`)
+
+        The user liking a deal.
+        Only `current` is allowed here.
+
+    + deal_id (int, required, `1012`)
+
+        ID of the deal which should be unliked
+
++ Response 204
+
+
+# Group DealPrices
+
+Some deals can have variable prices which are randomly drawn.
+For these deals an order can only be completed if there is a valid DealPrice for the user
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">270</td>
+      <td>
+        <q>This user has already an active price for this deal</q><br>
+        A user can only get a price every 24h. (10 seconds on the staging/testing server)
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">101</td>
+      <td>
+        <q>User doesn't own enough cards</q><br>
+        The currently logged-in user has not all cards of the deal
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## DealPrices [/deals/{deal_id}/dealPrices]
+
+### Retrieve all DealPrices of a User for a deal [GET]
+
++ Parameters
+
+    + deal_id (int, required, `1`)
+
+        The deal for which the dealPrices should be fetched. Will return 0 or 1 result
+        as a user has only one active dealPrice at a time for a deal.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dealPrices": [
+                    {
+                        "id": 1,
+                        "price_in_cents": 100,
+                        "dealid": 1,
+                        "time_used": "2015-06-03T20:54:59",
+                        "time_valid_until": "2015-06-04T20:54:59"
+                    }
+                ]
+            }
+
+### Draw a DealPrice for a deal for the logged-in user [POST]
+
++ Parameters
+
+    + deal_id (int, required, `1`)
+
+        The deal for which the dealPrice should be generated
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "dealPrice": {
+                    "id": 1,
+                    "price_in_cents": 100,
+                    "dealid": 1,
+                    "time_used": "2015-06-03T20:54:59",
+                    "time_valid_until": "2015-06-04T20:54:59"
+                }
+            }
+
+
+
+# Group Trades
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">70</td>
+      <td>
+        <q>Trade not found</q><br>
+        The requested trade could not be found.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">71</td>
+      <td>
+        <q>Not allowed to request a foreign trade</q><br>
+        The currently logged-in user is not part of the requested trade.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">72</td>
+      <td>
+        <q>Cannot create trade, illegal participants or added cards</q><br>
+        You can only create trades where you are the from_user and where all cards belong to the users in the trade.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">73</td>
+      <td>
+        <q>Cannot update trade state, invalid state transition</q><br>
+        Only some trade state changes are allowed.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## Trade [/trades/{id}]
+
+Attributes of a trade:
+
+*   `id` *(int)*:
+        The unique ID of the trade
+*   `from_user` *(int)*:
+        ID of the user who sent the trade
+*   `to_user` *(int)*:
+        ID of the user who recieved the trade
+*   `state` *(string)*:
+        The current state the trade is in. Can be one of the following:
+
+    >   `suggested` - A trade which is suggested to the from_user user.
+    >   `sent` - A trade offer sent to the to_user, ready for him to accept or decline.
+    >   `declined` - The trade was declined by the to_user.
+    >   `accepted` - Trade was successfull completed and the cards have been traded
+    >   `cancelled` - Trade was cancelled by the from_user, no cards were exchanged
+
+*   `time_updated` *(isodatetime)*:
+        The last time the trade was changed.
+
+*   `trade_cards` *(object)*:
+        Contains the card(s) that will be traded.
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "trade": {
+                    "id": 123,
+                    "from_user": {
+                        "id": 4809
+                    },
+                    "to_user": {
+                        "id": 631,
+                        "username": "Matthias",
+                        "image": <Image(50, 50)>
+                    },
+                    "state": "sent",
+                    "time_updated": "2013-12-31T23:59:59",
+                    "trade_cards": [
+                        {
+                            "trade_id": 123,
+                            "user_id": 4809,
+                            "deal_id": 1012,
+                            "number": 1,
+                            "quantity": 1
+                        },
+                        {
+                            "trade_id": 123,
+                            "user_id": 631,
+                            "deal_id": 1013,
+                            "number": 1,
+                            "quantity": 1
+                        }
+                    ]
+                }
+            }
+
+### Retrieve a Trade [GET]
+
++ Parameters
+
+    + id (int, required, `123`)
+
+        ID of the trade to fetch
+
++ Response 200
+
+    [Trade][]
+
+### Update the state of a Trade [PUT]
+
++ Parameters
+
+    + id (int, required, `123`)
+
+        ID of the trade to fetch
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "state": "sent"
+            }
+
++ Response 200
+
+    [Trade][]
+
+## Trade collection [/trades{?state,from_user_id,to_user_id}]
+
+### Retrieve all Trades of a User [GET]
+
++ Parameters
+
+    + state (string, required, `suggested`)
+
+        Can be any of the possible trade states.
+        Parameter can also be named `state[]`
+
+    + from_user_id = `current` (int, optional)
+
+        The ID of the user who started the trade.
+        Use `current` for the logged-in user.
+
+    + to_user_id (int, optional)
+
+        The ID of the user recieving the trade.
+        Use `current` for the logged-in user.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "trades": [
+                    {
+                        "id": 123,
+                        "from_user": {
+                            "id": 4809
+                        },
+                        "to_user": {
+                            "id": 631,
+                            "username": "Matthias",
+                            "image": <Image(50, 50)>
+                        },
+                        "state": "suggested",
+                        "time_updated": "2013-12-31T23:59:59",
+                        "trade_cards": [
+                            {
+                                "trade_id": 123,
+                                "user_id": 4809,
+                                "deal_id": 1012,
+                                "number": 1,
+                                "quantity": 1
+                            },
+                            {
+                                "trade_id": 123,
+                                "user_id": 631,
+                                "deal_id": 1013,
+                                "number": 1,
+                                "quantity": 1
+                            }
+                        ]
+                    }
+                ]
+            }
+
+### Create a new Trade [POST]
+
+A new trade which is offered to another user.
+Special case is when the new trade gets created based on an existing trade (`parent_trade_id` is set), in which case the old trade will automatically be declinded or cancelled.
+
+Special case: Sending cards to another user (without receiving any cards in return).
+In this case, the state of the trade can be set to "accepted" directly, causing the trade to be finished in one call.
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "trade_cards": [
+                    {
+                        "user_id": 4809,
+                        "deal_id": 1014,
+                        "number": 1,
+                        "quantity": 1
+                    },
+                    {
+                        "user_id": 631,
+                        "deal_id": 1012,
+                        "number": 1,
+                        "quantity": 1
+                    }
+                ],
+                "to_user": {
+                    "id": 631
+                }
+            }
+
++ Response 200
+
+    [Trade][]
+
+
+# Group AWS S3 Uploads
+
+To upload content (e.g. user pictures), it is necessary to get the credentials for the upload to S3.
+Our AWS Access Key ID is `AKIAJLTWEXEIQBB6JG5Q`.
+
+The process of uploading a user picture is:
+
+1.  Get policy, key and signature by POSTing an empty dict to /awsS3Uploads
+2.  Use a POST with enctype `multipart/form-data` and policy, key, success_action_status (must be "201") and signature as fields to upload the image.
+    See the [Amazon][AwsDocs] docs for details
+3.  After a successful upload, update the image (PUT /users/{id} with {"image": key})
+
+[AwsDocs]: http://docs.aws.amazon.com/AmazonS3/latest/dev/HTTPPOSTForms.html
+
+Limitations for userpic upload:
+
+*   Only images are allowed (Content-Type: `image/*`)
+*   The maximum file size is 4 megabytes.
+*   The filename cannot be chosen, instead a random key will be generated.
+*   The userpic can only be retrieved by using the name returned in the PUT response, as special URLs with formatted userpics will be generated.
+
+If the formular would be sent by a browser, the minimal HTML code would have to look like this:
+
+    <form action="https://dealini-userupload.s3.amazonaws.com/" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="key" value="userpics/akrwk45uksh3" />
+        <input type="hidden" name="AWSAccessKeyId " value="AKIAI3YXKI54O575Y6WA" />
+        <input type="hidden" name="Policy" value="eyAiZXhwaXJhdGlvbiI6ICIyMDA3LTEyLTAxVDEyOjAwOjAwLjAwMFoiLAogICJjb25kaXRpb25zIjogWwogICAgeyJidWNrZXQiOiAiam9obnNtaXRoIiB9LAogICAgWyJzdGFydHMtd2l0aCIsICIka2V5IiwgInVzZXIvZXJpYy8iXSwKICAgIHsiYWNsIjogInB1YmxpYy1yZWFkIiB9LAogICAgeyJyZWRpcmVjdCI6ICJodHRwOi8vam9obnNtaXRoLnMzLmFtYXpvbmF3cy5jb20vc3VjY2Vzc2Z1bF91cGxvYWQuaHRtbCIgfSwKICAgIFsic3RhcnRzLXdpdGgiLCAiJENvbnRlbnQtVHlwZSIsICJpbWFnZS8iXSwKICAgIHsieC1hbXotbWV0YS11dWlkIjogIjE0MzY1MTIzNjUxMjc0In0sCiAgICBbInN0YXJ0cy13aXRoIiwgIiR4LWFtei1tZXRhLXRhZyIsICIiXSwKICBdCn0K" />
+        <input type="hidden" name="Signature" value="2qCp0odXe7A9IYyUVqn0w2adtCA=" />
+        <input type="hidden" name="success_action_status" value="201" />
+        File: <input type="file" name="file" />
+        <input type="submit" name="submit" value="Upload to Amazon S3" />
+    </form>
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">190</td>
+      <td>
+        <q>Uploading with this resource type is forbidden</q><br>
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## AWSS3Upload collection [/awsS3Uploads]
+
+### Create new AWS Credentials [POST]
+
+The following parameters are available:
+
+*   `type` *(unicode string)*:
+        Either `userpics` (default) or `content` (admins only)
+*   `key` *(unicode string)*:
+        Only when uploading `type=content`: The exact filename to be used.
+*   `extension` *(unicode string)*:
+        File extension
+
++ Request for userpic upload (application/json)
+
+        {}
+
++ Response 200
+
+    + Body
+
+            {
+                "awsS3Upload": {
+                    "policy": "eyJjb25kaXRpb25zIjogW3siYnVja2V0IjogImRlYWxpbmktdXNlcnVwbG9hZCJ9LCB7ImtleSI6ICJ1c2VycGljL2tCSWdUYXJUYnY1RyJ9LCBbInN0YXJ0cy13aXRoIiwgIiRDb250ZW50LVR5cGUiLCAiaW1hZ2UvIl0sIFsiY29udGVudC1sZW5ndGgtcmFuZ2UiLCAwLCA0MTk0MzA0XSwgeyJzdWNjZXNzX2FjdGlvbl9zdGF0dXMiOiAiMjAxIn1dLCAiZXhwaXJhdGlvbiI6ICIyMDE0LTA2LTExVDA4OjA3OjM4WiJ9",
+                    "key": "userpic/kBIgTarTbv5G",
+                    "signature": "M0atzCtWogLrYFT8338RUsfGVCA="
+                }
+            }
+
+
+# Group Dashboard
+
+## Session collection [/dashboard/sessions]
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">120</td>
+      <td>
+        <q>Email or password did not match</q><br>
+      </td>
+      <td align="right">401</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">121</td>
+      <td>
+        <q>Session does not exist</q><br>
+      </td>
+      <td align="right">401</td>
+    </tr>
+  </tbody>
+</table>
+
+### Create a new Session [POST]
+
+The following parameters are available:
+
+*   `email` *(unicode string)*:
+        login of user
+*   `password` *(unicode string)*:
+        password of user
+
++ Request Login with Email and Password (application/json)
+
+        {
+            "email": "dealiniadmin@dealini.ch",
+            "password": "de-a-lini-admin"
+        }
+
++ Response 200
+
+    + Headers
+
+            Set-Cookie: dealinidev_auth=5b068891ae586391d30c4aeed158ce5a6829af58b5bb9280f22c46689c9314b61482edf8; httponly; Path=/
+            Access-Control-Allow-Credentials: true
+
+    + Body
+
+            {
+                "session": {
+                    "token": "5b068891ae586391d30c4aeed158ce5a6829af58b5bb9280f22c46689c9314b61482edf8",
+                    "userid": 288
+                }
+            }
+
+### Logout a User [DELETE]
+
++ Response 204
+
+    + Headers
+
+            Access-Control-Allow-Credentials: true
+            Set-Cookie: dealinidev_auth=5b068891ae586391d30c4aeed158ce5a6829af58b5bb9280f22c46689c9314b61482edf8; expires=Mon, 18-Feb-2013 12:17:57 GMT; httponly; Path=/
+
+## DashboardUser collection [/dashboard/dashboardusers]
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">130</td>
+      <td>
+        <q>No User found</q><br>
+        There is no user with the requested id.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">131</td>
+      <td>
+        <q>Email already exists</q><br>
+        A user with the same email address is already registered.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+### Retrieve all DashboardUsers [GET]
+
++ Response 200
+
+    + Body
+
+            {
+                "dashboardusers": [
+                    {"id": 98, "email": "michael.wirth@dealini.ch", "last_login": "2014-02-01T08:15:30+01:00", "active": true},
+                    {"id": 99, "email": "pascal.fierz@dealini.ch", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 100, "email": "rene@thebeach.ch", "last_login": "2013-12-25T10:15:30+01:00", "active": true},
+                    {"id": 101, "email": "tamara.ambrosini@dealini.ch", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 102, "email": "mw@monotone.ch", "last_login": "2014-04-01T01:15:30+01:00", "active": true},
+                    {"id": 103, "email": "jean-paul.saija@dealini.ch", "last_login": "2013-01-29T08:15:30+01:00", "active": true},
+                    {"id": 104, "email": "fabian.brun@dealini.ch", "last_login": "2013-10-11T08:15:30+01:00", "active": true},
+                    {"id": 105, "email": "taotao@hotmail.de", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 106, "email": "donymeca@gmail.com", "last_login": "2014-01-05T18:35:30+01:00", "active": true},
+                    {"id": 107, "email": "unpluggd@gmail.com", "last_login": "2013-10-21T08:15:30+01:00", "active": true},
+                    {"id": 108, "email": "beat.merkli@six-group.com", "last_login": "2013-08-11T08:15:30+01:00", "active": true},
+                    {"id": 109, "email": "boostup@gmx.ch", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 110, "email": "francisco@jent.ch", "last_login": "2014-03-08T05:15:30+01:00", "active": true},
+                    {"id": 111, "email": "wiseveri@student.ethz.ch", "last_login": "2013-09-19T08:15:30+01:00", "active": true},
+                    {"id": 112, "email": "daniela.paris@hosg.ch", "last_login": "2013-12-03T08:15:30+01:00", "active": true},
+                    {"id": 113, "email": "marc.waber@swissonline.ch", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 114, "email": "eavdyli@hispeed.ch", "last_login": "2014-01-21T08:15:30+01:00", "active": true},
+                    {"id": 115, "email": "cisco@jent.ch", "last_login": "2013-11-21T08:15:30+01:00", "active": true},
+                    {"id": 116, "email": "james@prodigi.ch", "last_login": "2014-01-30T08:15:30+01:00", "active": true}
+                ]
+            }
+
+## DashboardUser [/dashboard/dashboardusers/{id}]
+
+### Retrieve a DashboardUser [GET]
+
++ Parameters
+
+    + id (int, required, `288`)
+
+        ID of the user to fetch.
+        Use `current` for the logged-in user.
+
++ Response 200
+
+    + Body
+
+            {
+                "dashboarduser": {
+                    "id": 288,
+                    "email": "james@prodigi.ch",
+                    "last_login": "2013-11-21T08:15:30+01:00",
+                    "active": true,
+                    "roles": ["bp", "admin"],
+                    "permissions": ["main", "register", "settings", "permissions"]
+                }
+            }
+
+## Permission collection [/dashboard/permissions]
+
+### Retrieve all Permissions [GET]
+
++ Response 200
+
+    + Body
+
+            {
+                "permissions": [
+                    {"id": 1, "name": "settings"},
+                    {"id": 2, "name": "redemptions"},
+                    {"id": 3, "name": "statistics"}
+                ]
+            }
+
+## Role collection [/dashboard/roles]
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">140</td>
+      <td>
+        <q>Rolename already exists</q><br>
+        A role with the same name is already registered.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+### Retrieve all Roles [GET]
+
++ Response 200
+
+    + Body
+
+            {
+                "roles": [
+                    {"id": 1, "name": "admin", "permissions": []},
+                    {"id": 2, "name": "investor", "permissions": [{"id": 1}, {"id": 2}]},
+                    {"id": 3, "name": "bp",  "permissions": [{"id": 2}, {"id": 3}]}
+                ]
+            }
+
+## Role [/dashboard/roles/{id}]
+
+### Update a Role [PUT]
+
++ Parameters
+
+    + id (int, required, `3`)
+
+        ID of the role
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "permissions": [{"id": 1}, {"id": 3}]
+            }
+
++ Response 200
+
+    + Body
+
+            {
+                "role": {"id": 3, "name": "bp",  "permissions": [{"id": 1}, {"id": 3}]}
+            }
+
+
+# Group Products
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">110</td>
+      <td>
+        <q>No Product found</q><br>
+        This is an unknown product.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## Product [/products/{id}]
+
+A product describes something which can be bought / redeemed.
+
+Attributes of a product:
+
+*   `id` *(int)*:
+        ID of the product
+*   `name` *(string)*:
+        Short descriptive name of the product
+*   `price_in_cents` *(int)*:
+        The products price in cents (Rappen)
+*   `image` *(Image)*:
+        The image of the product
+*   `configuration` *(dict)*:
+        The option for this product. Options are configured on the deal.
+*   `requires_shipping_address` *(boolean)*:
+        If a shipping address must be asked from the buyer.
+*   `requires_payment` *(boolean)*:
+        If a payment must be done for this product before a successful redemption.
+*   `requires_phone` *(boolean)*:
+        If an order needs a phone from the buyer.
+*   `shipping_costs_in_cents` *(int)*:
+        The price for the shipping costs in cents (Rappen)
+*   `min_age` *(int)*:
+        The minimum age of the person ordering in years (`null` if not restricted).
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "product": {
+                    "id": 1,
+                    "deal_id": 1012,
+                    "type": "deal
+                    "name": "Gutschein für eine Mahlzeit",
+                    "price_in_cents": 10000,
+                    "images": [
+                        <Image(320, 200)>,
+                        <Image(320, 200)>,
+                        <Image(320, 200)>
+                    ],
+                    "configuration": {"1": 1},
+                    "requires_shipping_address": true,
+                    "requires_payment": true,
+                    "requires_phone": false,
+                    "shipping_costs_in_cents": 0,
+                    "min_age": null,
+                    "requires_phone": false
+                }
+            }
+
+### Retrieve a Product [GET]
+
++ Parameters
+
+    + id (int, required, `1`)
+
+        ID of the product to fetch
+
++ Response 200
+
+    [Product][]
+
+## Products of a Deal [/deals/{id}/products]
+
+### Retrieve all Products of a Deal [GET]
+
+Available parameters:
+
+*   `limit` *(int)*:
+        Number of products to return. Default: All products.
+*   `configuration` *(string)*:
+        Only return the product with this configuration.
+        Configuration must be given in this format: `1:1,2:2`
+
++ Parameters
+
+    + id (int, required, `1012`)
+
+        ID of the deal for which the products should be fetched
+
++ Response 200
+
+    + Body
+
+            {
+                "products": [
+                    {
+                        "id": 1,
+                        "deal_id": 1012,
+                        "type": "deal
+                        "name": "Gutschein für eine Mahlzeit",
+                        "price_in_cents": 10000,
+                        "images": [
+                            <Image(320, 200)>,
+                            <Image(320, 200)>,
+                            <Image(320, 200)>
+                        ],
+                        "configuration": {"1": 1},
+                        "requires_shipping_address": true,
+                        "requires_payment": true,
+                        "requires_phone": false,
+                        "shipping_costs_in_cents": 0,
+                        "min_age": null,
+                        "requires_phone": false
+                    },
+                    {
+                        "id": 2,
+                        "deal_id": 1012,
+                        "type": "deal
+                        "name": "Gutschein für eine Mahlzeit",
+                        "price_in_cents": 10000,
+                        "images": [
+                            <Image(320, 200)>,
+                            <Image(320, 200)>,
+                            <Image(320, 200)>
+                        ],
+                        "configuration": {"1": 1},
+                        "requires_shipping_address": true,
+                        "requires_payment": true,
+                        "requires_phone": false,
+                        "shipping_costs_in_cents": 0,
+                        "min_age": null,
+                        "requires_phone": false
+                    },
+                    {
+                        "id": 3,
+                        "deal_id": 1012,
+                        "type": "deal
+                        "name": "Gutschein für eine Mahlzeit",
+                        "price_in_cents": 10000,
+                        "images": [
+                            <Image(320, 200)>,
+                            <Image(320, 200)>,
+                            <Image(320, 200)>
+                        ],
+                        "configuration": {"1": 1},
+                        "requires_shipping_address": true,
+                        "requires_payment": true,
+                        "requires_phone": false,
+                        "shipping_costs_in_cents": 0,
+                        "min_age": null,
+                        "requires_phone": false
+                    },
+                ]
+            }
+
+
+# Group Orders
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">100</td>
+      <td>
+        <q>Product out of stock</q><br>
+        There are no more products available to be ordered.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">101</td>
+      <td>
+        <q>User doesn't own enough cards</q><br>
+        To redeem, the user must have a card from each card unit of the product's deal.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">102</td>
+      <td>
+        <q>Cannot access order of another User</q><br>
+        Only the orders of the logged-in user may be retrieved.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">103</td>
+      <td>
+        <q>No order found</q><br>
+        The requested order does not exist.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">104</td>
+      <td>
+        <q>Invalid update, order is read-only</q><br>
+        Once the order is paid, no updates can be issued by the user.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">105</td>
+      <td>
+        <q>Invalid update, invalid status change from {{old_status}} to {{new_status}}</q><br>
+        Only some order status changes are allowed:
+        <ul>
+          <li>`reserved` -> `paid`:
+              Marks an order as paid.
+              The server will check if the address and payment are complete.
+          </li>
+        </ul>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">106</td>
+      <td>
+        <q>Invalid order, cannot be paid</q><br>
+        The order got invalid during the reservation (out of stock, or cards have been traded).
+      </td>
+      <td align="right">40</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">107</td>
+      <td>
+        <q>Transaction already recorded</q><br>
+        The transaction ID is already used.
+        Most likely the receipt was accidentially sent twice.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">109</td>
+      <td>
+        <q>Not old enough to order the product</q><br>
+        For some products, it is necessary to be above a certain age (e.g., 18 years old).
+        This error will happen if the user has no birthday set (on billing_address.birthday and delivery_address.birthday) or if he is too young.
+        See `Product.min_age`.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">10001</td>
+      <td>
+        <q>Product is not redeemable anymore</q><br>
+        The product has been set to non-redeemable manually
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">10002</td>
+      <td>
+        <q>User doesn't have a valid price for this deal</q><br>
+        For deals with variable_pricing enabled, a valid (not older than 24h) dealPrice must exists.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">10003</td>
+      <td>
+        <q>User doesn't own this instant prize card</q><br>
+        For instant prices, the user must own the instant price card to redeem it.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## Order [/orders/{id}]
+
+An order corresponds to a user buying a product.
+
+Ordering a product usually involves the following steps:
+
+1.  Prepare an order by creating a new empty order.
+    It will expire after 15min (POST /orders)
+2.  Update (PUT) the product chosen by the user.
+    This will automatically extend the orders reservation time.
+3.  Update (PUT) the necessary shipping information.
+    This will automatically extend the orders reservation time.
+4.  Process the payment using Datatrans.
+    The payments refid and signature are provided in the `payment` object ("id" and "sign").
+5.  If no payment is necessary (e.g. if the price is 0), the order is paid by setting the status to "paid" (PUT).
+6.  Refresh the order if necessary, e.g. after processing the payment from datatrans.
+    The status should be "paid" now.
+
+Special cases:
+
+*   Reservation times out, but order is still possible:
+    The order is re-opened and used as if it never expired
+*   The age of the user must be checked if `product.min_age` is set.
+    In these cases, the birthday must be sent with the billing_address, otherwise the order will fail during payment.
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the order
+*   `product` *(Product)*:
+        The product which got ordered
+*   `user_id` *(int)*:
+        ID of the user who ordered this product
+*   `status` *(string)*:
+        Descriptive status of the orders state. Possible states:
+
+    >   `reserved` - The order is not yet completed, but the product is reserved for the user.
+        Reservations time out after 15 minutes.
+    >   `paid` - The order was completed successfully, e.g. the payment was received and the cards were redeemed.
+    >   more states will be defined to tell the user about the orders progress (e.g. shipping date and progress)
+
+*   `status_formatted` *(string)*:
+        The status of the order as it can be displayed to the user (e.g. "Ausgeliefert").
+*   `time_ordered` *(isodatetime)*:
+        The time when the order was made (e.g. after successful payment / redemption)
+*   `billing_address` *(boolean)*:
+        The address where the bill will be sent to.
+*   `shipping_address` *(boolean)*:
+        The address where the product will be sent to (mostly the same as `billing_address`).
+*   `use_billing_address_as_shipping_address` *(boolean)*:
+        If the `biling_address` is the same as `shipping_address`.
+*   `pdf` *(string)*:
+        A link to a PDF if the order needs the buyer to fill out a form or if we want to send him information via PDF, otherwise set as `NULL`
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "order": {
+                    "id": 1,
+                    "product": {
+                        "id": 1,
+                        "deal_id": 1012,
+                        "type": "deal
+                        "name": "Gutschein für eine Mahlzeit",
+                        "price_in_cents": 10000,
+                        "images": [
+                            <Image(320, 200)>,
+                            <Image(320, 200)>,
+                            <Image(320, 200)>
+                        ],
+                        "configuration": {"1": 1},
+                        "requires_shipping_address": true,
+                        "requires_payment": true,
+                        "shipping_costs_in_cents": 0,
+                        "min_age": null,
+                        "requires_phone": false,
+                        "stock": "infinity"
+                    },
+                    "user_id": 82887,
+                    "payment": {
+                        "id": 34567,
+                        "sign": "089652cb68092e6fb321d15cd4f507be"
+                    },
+                    "billing_address": {
+                        "id": 29301,
+                        "title": "Mr",
+                        "first_name": "Max",
+                        "last_name": "Mustermann",
+                        "street": "Strasse 1",
+                        "postal_code": "1234",
+                        "city": "Stadt",
+                        "country_iso_code": "CH",
+                        "birthday": "1984-12-31"
+                        "phone": null,
+                        "company_name": "",
+                        "unformatted": ""
+                    },
+                    "status": "paid",
+                    "status_formatted": "Bezahlt",
+                    "time_ordered": "2014-03-10T23:59:59"
+                    "time_confirmed": "2014-03-11T23:59:59"
+                    "use_billing_address_as_shipping_address": true,
+                    "shipping_address": {
+                        "id": 29301,
+                        "title": "Mr",
+                        "first_name": "Max",
+                        "last_name": "Mustermann",
+                        "street": "Strasse 1",
+                        "postal_code": "1234",
+                        "city": "Stadt",
+                        "country_iso_code": "CH",
+                        "birthday": "1984-12-31"
+                        "phone": null,
+                        "company_name": "",
+                        "unformatted": ""
+                    },
+                }
+            }
+
+### Retrieve an Order [GET]
+
++ Parameters
+
+    + id (int, required, `1`)
+
+        ID of the oder to fetch
+
++ Response 200
+
+    [Order][]
+
+### Update an Order [PUT]
+
+The following fields can be changed:
+
+*   `address` *(Address)*:
+        The billing address.
+        Used as shipping address if no shipping address is defined.
+*   `status` *(string)*:
+        Can be set to "paid" for orders where no payment is necessary (e.g. where the product is free)
+*   `product` *(Product)*:
+        The product which should be ordered.
+        Can be changed until the payment is processed.
+
++ Parameters
+
+    + id (int, required, `1`)
+
+        ID of the oder to update
+
++ Request (application/json)
+
+        {
+            "product": {
+                "id": 1
+            },
+            "billing_address": {
+                "title": "Mr",
+                "first_name": "Max",
+                "last_name": "Mustermann",
+                "street": "Strasse 1",
+                "postal_code": "1234",
+                "city": "Stadt",
+                "country_iso_code": "CH"
+            },
+            "status": "paid"
+        }
+
++ Response 200
+
+    [Order][]
+
+## Order collection [/orders]
+
+### Retrieve all Orders of a User [GET]
+
+Usually only shows the orders of the logged-in user.
+
++ Response 200
+
+    + Body
+
+            {
+                "orders": [
+                    {
+                        "id": 1,
+                        "product": {
+                            "id": 1,
+                            "deal_id": 1012,
+                            "type": "deal
+                            "name": "Gutschein für eine Mahlzeit",
+                            "price_in_cents": 10000,
+                            "images": [
+                                <Image(320, 200)>,
+                                <Image(320, 200)>,
+                                <Image(320, 200)>
+                            ],
+                            "configuration": {"1": 1},
+                            "requires_shipping_address": true,
+                            "requires_payment": true,
+                            "shipping_costs_in_cents": 0,
+                            "min_age": null,
+                            "requires_phone": false
+                        },
+                        "user_id": 82887,
+                        "payment": {
+                            "id": 1,
+                            "payment_mean": {
+                                "id": 1,
+                                "holder": "Max Mustermann",
+                                "type": "visa",
+                                "alias": "12345678901234567",
+                                "card_number_suffix": "1234",
+                                "expiry_date": "2016-09-01"
+                            }
+                        },
+                        "billing_address": {
+                            "title": "Mr",
+                            "first_name": "Max",
+                            "last_name": "Mustermann",
+                            "street": "Strasse 1",
+                            "postal_code": "1234",
+                            "city": "Stadt",
+                            "country_iso_code": "CH",
+                            "birthday": "1984-12-31"
+                        },
+                        "status": "paid",
+                        "status_formatted": "Bezahlt",
+                        "time_ordered": "2014-03-10T23:59:59"
+                    }
+                    {
+                        "id": 2,
+                        "product": {
+                            "id": 1,
+                            "deal_id": 1012,
+                            "type": "deal
+                            "name": "Gutschein für eine Mahlzeit",
+                            "price_in_cents": 10000,
+                            "images": [
+                                <Image(320, 200)>,
+                                <Image(320, 200)>,
+                                <Image(320, 200)>
+                            ],
+                            "configuration": {"1": 1},
+                            "requires_shipping_address": true,
+                            "requires_payment": true,
+                            "shipping_costs_in_cents": 0,
+                            "min_age": null,
+                            "requires_phone": false
+                        },
+                        "user_id": 82887,
+                        "payment": {
+                            "id": 2,
+                            "payment_mean": {
+                                "id": 1,
+                                "holder": "Max Mustermann",
+                                "type": "visa",
+                                "alias": "12345678901234567",
+                                "card_number_suffix": "1234",
+                                "expiry_date": "2016-09-01"
+                            }
+                        },
+                        "billing_address": {
+                            "title": "Herr",
+                            "first_name": "Max",
+                            "last_name": "Mustermann",
+                            "street": "Strasse 1",
+                            "postal_code": "1234",
+                            "city": "Stadt",
+                            "country_iso_code": "CH",
+                            "birthday": "1984-12-31"
+                        },
+                        "status": "reserved",
+                        "status_formatted": "Reserviert (15min)",
+                        "time_ordered": "2014-03-10T23:59:59",
+                        "time_confirmed": "2014-03-11T23:59:59"
+                        "use_billing_address_as_shipping_address": true,
+                        "shipping_address": {
+                            "id": 29301,
+                            "title": "Mr",
+                            "first_name": "Max",
+                            "last_name": "Mustermann",
+                            "street": "Strasse 1",
+                            "postal_code": "1234",
+                            "city": "Stadt",
+                            "country_iso_code": "CH",
+                            "birthday": "1984-12-31"
+                            "phone": null,
+                            "company_name": "",
+                            "unformatted": ""
+                        },
+                    }
+                ]
+            }
+
+### Create a new Order [POST]
+
+Fields which can be set during creation (all optional):
+
+*   `product_id` *(int)*:
+        ID of the product for this order
+*   `user_id` *(int)*:
+        ID of the user who orders
+*   `payment` *(PaymentRequestObject)*:
+        For an in-app purchase the order can directly be paid
+
+#### PaymentRequestObject
+
+When creating an order, it can be paid directly using an in-app payment from Apple or Google.
+
+*   `apple_receipt` *(base64 encoded string)*:
+        The receipt received from Apple after the in-app payment by the app
+*   `google_token` *(string)*:
+        Token received from the Google play store after the in-app payment
+*   `google_product_id` *(string)*:
+        The product which was ordered as stored inside the Google play store.
+
+#### Google payment process
+
+During the payment process, it is necessary to create a "developerPayload" which is used as the unique transaction ID.
+The app must create a random unsigned integer up to 8 bytes long (0 - 18'446'744'073'709'551'615) to make the transaction unique.
+This unique transaction ID must be sent to Google when doing the payment and is later given to the API server (by the Google Developer API) during payment validation.
+
++ Request (application/json)
+
+        {}
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "order": {
+                    "id": 1,
+                    "product": null,
+                    "user_id": 82887,
+                    "payment": null,
+                    "billing_address": {
+                        "title": "Mr",
+                        "first_name": "",
+                        "last_name": "",
+                        "street": "",
+                        "postal_code": "",
+                        "city": "",
+                        "country_iso_code": "CH",
+                        "birthday": null
+                    },
+                    "status": "reserved",
+                    "status_formatted": "Reserviert",
+                    "time_ordered": "2014-03-10T23:59:59"
+                }
+            }
+
+
+# Group PaymentMeans
+
+A payment mean is a credit card (or similar) to pay online.
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">150</td>
+      <td>
+        <q>PaymentMean not found</q><br>
+        This payment mean does not exist in our database (anymore).
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">151</td>
+      <td>
+        <q>Cannot access payment mean of another user</q><br>
+        Only payment means owned by the logged-in user can be deleted.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## PaymentMean [/paymentMeans/{id}]
+
+Attributes:
+
+*   `id` *(int)*:
+        ID of the payment mean.
+*   `type` *(string)*:
+        Can be `visa`, `mastercard` or `postcard`.
+*   `holder` *(string, maxlength: 50)*:
+        Name of the holder of the card
+*   `alias` *(string)*:
+        A unique identifier of this card used by Datatrans.
+        Can be used to identify the card without having to provide the full data again
+*   `card_number_suffix` *(string, maxlength: 4)*:
+        The last 4 digits of the card.
+        Usefull to show the user which card he has stored.
+*   `expiry_date` *(isodate)*:
+        Isodate of the first day of the month where the card expires
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "paymentMean": {
+                    "id": 1,
+                    "holder": "Max Mustermann",
+                    "type": "visa",
+                    "alias": "12345678901234567",
+                    "card_number_suffix": "1234",
+                    "expiry_date": "2014-09-01",
+                }
+            }
+
+### Remove a PaymentMean [DELETE]
+
++ Response 204
+
+## PaymentMean collection [/paymentMeans]
+
+### Retrieve all PaymentMeans of the logged-in User [GET]
+
++ Response 200
+
+    + Body
+
+            {
+                "paymentMeans": [
+                    {
+                        "id": 1,
+                        "holder": "Max Mustermann",
+                        "type": "visa",
+                        "alias": "12345678901234567",
+                        "card_number_suffix": "1234",
+                        "expiry_date": "2014-09-01",
+                    },
+                    {
+                        "id": 2,
+                        "holder": "Max Mustermann",
+                        "type": "mastercard",
+                        "alias": "76543210987654321",
+                        "card_number_suffix": "4321",
+                        "expiry_date": "2014-09-01",
+                    },
+                ]
+            }
+
+### Register a new PaymentMean [POST]
+
+A payment mean should only be registered if it is checked and valid, e.g. after it was used in a payment for the first time.
+
++ Request (application/json)
+
+        {
+            "type": "visa",
+            "holder": "Max Mustermann",
+            "alias": "12345678901234567",
+            "card_number_suffix": "1234",
+            "expiry_date": "2014-09-01"
+        }
+
++ Response 200
+
+    [PaymentMean][]
+
+
+# Group Notifications
+
+Notifications are generated by various actions, initiated by the user or the server.
+We are using [Parse] to send push notifications to the mobile devices (using the channel name set in `User.push_notification_channel`)
+
+[Parse]: https://www.parse.com
+
+Each mobile device should register to the push notification channel of the logged-in user (see the Parse documentation on [Android][ParseAndroid] and [iOS][ParseIos]).
+
+[ParseAndroid]: https://www.parse.com/docs/push_guide#sending-channels/Android
+[ParseIos]: https://www.parse.com/docs/push_guide#sending-channels/iOS
+
+For every push notification, the following fields are set:
+
+*   `alert` *(string)*:
+        The text of the message
+*   `badge` *(string, 'increment')*:
+        Always set to "increment" to make parse do the counting.
+*   `content-available` *(int, 1)*:
+        Always active to allow push notifications without the app being active
+
+The data sent using push notifications is limited by Apple's 255 byte limit.
+For this reason, we are sending a subset of fields with shorter names as part of the "data":
+
+*   `code` *(int)*:
+        The code of the notification, used to call the correct action
+*   `i` *(string)*:
+        URL of the image which should be displayed next to the notification
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">110</td>
+      <td>
+        <q>Could not find notification</q><br>
+        The requested notification does not exist.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">111</td>
+      <td>
+        <q>Cannot access notification of another user</q><br>
+        Only notifications of the logged-in user can be accessed.
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">112</td>
+      <td>
+        <q>Invalid notification change</q><br>
+        Cannot un-see or un-consume notification.
+      </td>
+      <td align="right">404</td>
+    </tr>
+  </tbody>
+</table>
+
+## Possible Notifications
+
+#### General
+
+*   Code 1: - Reserved for manual messages
+
+#### Trades
+
+*   Code 11: *"Neues Tauschangebot erhalten"* - when a suggested trade is sent to a user
+*   Code 12: *"%s hat dein Angebot akzeptiert"* - when a trade is accepted
+*   Code 13: *"%s hat dein Angebot abgelehnt"* - when a trade is declined by the receiving user
+*   Code 14: *"%s hat dir einen Sticker geschickt"* - when a card is sent (gifted) to a friend
+
+#### Friend requests
+
+*   Code 21: *"%s möchte dich als Freund hinzufügen"* - on friend request
+*   Code 22: *"%s hat deine Freundschaftanfrage akzeptiert"* - on friend accept.
+        Can also happen on friend request if the other user already requested the friendship.
+
+#### Credits / Flowpacks
+
+*   Code 31: *"Du hast von %s ein Sticker-Päckchen gesponsert bekommen!"* - when a flowpack is gifted to a user from a brand
+
+## Notification [/notifications/{id}]
+
++ Model (application/json)
+
+    + Body
+
+            {
+                "notification": {
+                    "id": 1,
+                    "code": 1,
+                    "consumed": false,
+                    "seen": true,
+                    "text": "Neues Tauschangebot erhalten",
+                    "image": <Image(50, 50)>,
+                    "time_created": "2014-05-26T08:32:22"
+                }
+            }
+
+### Mark a Notification as consumed or seen [PUT]
+
++ Parameters
+
+    + id (int, required, `1`)
+
+        ID of the notification to update
+
++ Request (application/json)
+
+        {
+            "consumed": true
+        }
+
++ Response 200
+
+    [Notification][]
+
+## Notification collection [/notifications]
+
+### Retrieve all Notifications of the logged-in User [GET]
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "notifications": [
+                    {
+                        "id": 1,
+                        "code": 0,
+                        "consumed": false,
+                        "seen": false,
+                        "text": "Neues Tauschangebot erhalten",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "id": 2,
+                        "code": 1,
+                        "consumed": false,
+                        "seen": false,
+                        "text": "Tauschangebot akzeptiert",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "id": 3,
+                        "code": 2,
+                        "consumed": false,
+                        "seen": false,
+                        "text": "Tauschangebot abgelehnt",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "id": 4,
+                        "code": 0,
+                        "consumed": true,
+                        "seen": true,
+                        "text": "Neues Tauschangebot erhalten",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "id": 5,
+                        "code": 1,
+                        "consumed": true,
+                        "seen": true,
+                        "text": "Tauschangebot akzeptiert",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    }
+                ]
+            }
+
+### Update all Notifications of the logged-in User [PUT]
+
+Return the newest 10 notifications, independent if they were changed or not.
+
++ Request (application/json)
+
+        {
+            "consumed": true
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "notifications": [
+                    {
+                        "id": 1,
+                        "code": 0,
+                        "consumed": true,
+                        "seen": false,
+                        "text": "Neues Tauschangebot erhalten",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "id": 2,
+                        "code": 1,
+                        "consumed": true,
+                        "seen": false,
+                        "text": "Tauschangebot akzeptiert",
+                        "image": <Image(50, 50)>,
+                        "time_created": "2014-05-26T08:32:22"
+                    }
+                ]
+            }
+
+
+# Group PasswordResets
+
+## PasswordReset [/resetPassword]
+
+Send a password reset email and reset password
+
+### Request a PasswordReset [POST]
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "email": "dealinitest1@dealini.ch",
+            }
+
++ Response 204
+
+### Perform a PasswordReset [PUT]
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "email": "dealinitest1@dealini.ch",
+                "password": "bla123",
+                "reset_token": "q7H6kw25Fd",
+            }
+
++ Response 204
+
+
+# Group Games
+
+## GameCredit collection [/users/{user_id}/gamecredits]
+
+### Retrieve all usable GameCredits of a User [GET]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user for which we want to fetch the friendships.
+        Use `current` for the logged-in user.
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "gamecredits": [
+                    {
+                        "id": 145
+                    },
+                    {
+                        "id": 146
+                    },
+                    {
+                        "id": 147
+                    },
+                    {
+                        "id": 148
+                    },
+                    {
+                        "id": 149
+                    },
+                    {
+                        "id": 150
+                    },
+                    {
+                        "id": 151
+                    },
+                    {
+                        "id": 152
+                    },
+                    {
+                        "id": 153
+                    },
+                    {
+                        "id": 154
+                    }
+                ]
+            }
+
+### Buy GameCredits with Dollarini [POST]
+
++ Request (application/json)
+
+        {
+            "dollarinis": 4
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "gamecredits": [
+                    {
+                        "id": 155
+                    },
+                    {
+                        "id": 156
+                    }
+                ]
+            }
+
+## GameCredit [/users/{user_id}/gamecredits/{gamecredit_id}]
+
+### Record a GameScore [PUT]
+
++ Request (application/json)
+
+        {
+            "score": "3f23z43h"
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "highscore": {
+                    "user_id": 631,
+                    "score": 95,
+                    "time_created": "2014-05-26T08:32:22"
+                }
+            }
+
+## Highscore collection [/games/{game_id}/highscores]
+
+### Retrieve the Highscores of a Game [GET]
+
+By default returns the daily top ten scores.
+
++ Parameters
+
+    + game_id (int, required, `1`)
+
+        The id of the highscore's game
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "highscores": [
+                   {
+                        "user_id": 631,
+                        "score": 95,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 1551,
+                        "score": 93,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 748,
+                        "score": 90,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 5389,
+                        "score": 87,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 2462,
+                        "score": 86,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 6382,
+                        "score": 85,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 9535,
+                        "score": 83,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 266,
+                        "score": 80,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 2316,
+                        "score": 79,
+                        "time_created": "2014-05-26T08:32:22"
+                    },
+                    {
+                        "user_id": 6584,
+                        "score": 78,
+                        "time_created": "2014-05-26T08:32:22"
+                    }
+                ]
+            }
+
+
+# Group ConfirmImages
+
+## ConfirmImage for a new User [/confirm/{user_id}]
+
+### Retrieve a ConfirmImage [GET]
+
++ Parameters
+
+    + user_id (int, required, `4809`)
+
+        The user which registered with the email address where this image will be found
+
++ Response 200 (image/jpg)
+
+        <Imagedata>
+
+
+# Group Statistics
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">250</td>
+      <td>
+        <q>No Access</q><br>
+        You supplied a wrong access key.
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">210</td>
+      <td>
+        <q>No Access</q><br>
+        You supplied a wrong access key.
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## CampaignStatistics HDMD14 [/campaignStats/HDM14{?access_key}]
+
+### Retrieve CampaignStatistics [GET]
+
++ Parameters
+
+    + access_key (string, required, `n5i43b531b34`)
+
+        key for access
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "campaign_stats": {
+                    "user_count": 994725,
+                    "order_count": 756856,
+                    "register_count": 632463,
+                    "example_deal_stats": "http://www.dealini.ch/#/deal/1088/stats/e4d3338e5e",
+                    "total_amount_of_completed_cardsets": 2346366,
+                    "flowpack_count_app": 2343725,
+                    "scan_rate": 100,
+                    "average_scans__per_user": 100,
+                    "flowpack_count": 52352636,
+                    "album_count": 513561
+                }
+            }
+
+## DealStatistics [/deals/{deal_id}/statistics{?access_key}]
+
+### Retrieve Statistics of a Deal [GET]
+
++ Parameters
+
+    + deal_id (string, required, `n5i43b531b34`)
+
+        key for access
+
+    + access_key (string, required, `n5i43b531b34`)
+
+        key for access
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "statistic": {
+                    "distinct_order_count": 4371,
+                    "order_count": 4428,
+                    "trade_count": 152869,
+                    "likes_rank": 9,
+                    "like_count": 2743,
+                    "likes_progress": 12,
+                    "scan_rate": 0.34183333333333334,
+                    "completed_cardsets": 4052,
+                    "card_count": 94825,
+                    "distinct_card_count": 22087,
+                    "orders_rank": 10
+                }
+            }
+
+# Group PartnerLinks
+
+## Error-Codes
+
+<table>
+  <thead>
+    <tr>
+      <th align="center">Code</th>
+      <th>Message/Description</th>
+      <th align="right">HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">200</td>
+      <td>
+        <q>Unknown code</q>
+      </td>
+      <td align="right">404</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">201</td>
+      <td>
+        <q>Code already used</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">202</td>
+      <td>
+        <q>Dieser Code wurde von dir bereits eingelöst.</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">203</td>
+      <td>
+        <q>Du hast den Code heute bereits gescannt.</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">204</td>
+      <td>
+        <q>You can only create invite links originating from the logged-in user</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">205</td>
+      <td>
+        <q>You cannot use an invite link which you created yourself</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+    <tr><!-- === ERROR DEFINITION === -->
+      <td align="center">206</td>
+      <td>
+        <q>The card cannot be gifted as the user does not own any such card</q>
+      </td>
+      <td align="right">403</td>
+    </tr>
+  </tbody>
+</table>
+
+## PartnerLinks Collection [/partnerLinks]
+
+### Create PartnerLink to invite friend or send a card [POST]
+
+The `become_friend_with` parameter inside `data` is mandatory, the `gift_card` is optional.
+If a `gift_card` is provided, this card will immediatly be removed from the players cards. The player
+who is using the partnerlink (see DELETE call) gets the card, which can be the same user.
+
++ Request (application/json)
+
+        {
+            "data": {
+                "become_friend_with": {"id": 1},
+                "gift_card": {"deal_id": 1, "number": 1}
+            }
+        }
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "partnerLink": {
+                    "url": "http://example.com/N26f0vVqRUn0",
+                    "credits": null,
+                    "code": "N26f0vVqRUn0",
+                    "data": {
+                        "gift_card": {
+                            "deal_id": 1,
+                            "number": 1
+                        },
+                        "become_friend_with": {
+                            "id": 1
+                        }
+                    }
+                }
+            }
+
+## PartnerLink [/partnerLinks/{code}]
+
+### Use a PartnerLink [DELETE]
+
+This is usually done using a web form where the URL parameter is actually linking to.
+Except for "invalidating" a partner code if the user wants his card back, there is no
+use for this call inside the app (for now).
+
++ Parameters
+
+    + code (string, required, `N26f0vVqRUn0`)
+
+        The actual partner code
+
++ Response 200 (application/json)
+
+    + Body
+
+            {
+                "partnerLink": {
+                    "url": "http://example.com/N26f0vVqRUn0",
+                    "credits": null,
+                    "code": "N26f0vVqRUn0",
+                    "data": {
+                        "gift_card": {
+                            "deal_id": 1,
+                            "number": 1
+                        },
+                        "become_friend_with": {
+                            "id": 1
+                        }
+                    }
+                }
             }
